@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tutor PRL Financiero</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Tutor PRL en Entorno Financiero</h1>
+      <p>Escribe tus respuestas y dudas. El tutor adaptará las explicaciones.</p>
+    </header>
+
+    <main id="chat-container"></main>
+
+    <form id="chat-form">
+      <input
+        type="text"
+        id="user-input"
+        placeholder="Escribe aquí..."
+        autocomplete="off"
+      />
+      <button type="submit">Enviar</button>
+    </form>
+
+    <!-- Botón "Nuevo Test" dentro de la estructura del app, abajo del todo -->
+    <div class="footer-section">
+      <button onclick="clearProgress()" class="reset-button">Nuevo Test</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
