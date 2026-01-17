@@ -1,5 +1,5 @@
 // ===== CONFIGURACIÓN =====
-const WORKER_URL = "https://tutor-prl-backend.s-morenoleiva91.workers.dev";
+const WORKER_URL = "https://tutor-prl2.s-morenoleiva91.workers.dev";
 const REQUEST_DELAY_MS = 2000;
 
 // ===== VARIABLES GLOBALES =====
@@ -205,3 +205,4 @@ chatForm.addEventListener("submit", async (e) => {
 });
 
 setInterval(saveProgress, 15000);
+
