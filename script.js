@@ -20,7 +20,8 @@ let userState = {
 };
 
 let isRequestInProgress = false;
-let currentOptions = null; // Opciones de la pregunta actual
+let currentOptions = null;
+let isFirstMessage = true; // Para saber si es la primera pregunta (rol)
 
 // ===== FUNCIONES AUXILIARES =====
 
@@ -50,17 +51,6 @@ function addMessage(text, sender = "bot", metadata = {}) {
     
     div.appendChild(optionsDiv);
     currentOptions = metadata.options;
-  }
-  
-  // Añadir fuentes si existen
-  if (metadata.sources && metadata.sources.length > 0) {
-    const sourcesDiv = document.createElement("div");
-    sourcesDiv.classList.add("sources");
-    sourcesDiv.innerHTML = "<strong>📚 Fuentes PRL:</strong><br>";
-    metadata.sources.forEach((source, index) => {
-      sourcesDiv.innerHTML += `${index + 1}. ${source.topic} - ${source.section}<br>`;
-    });
-    div.appendChild(sourcesDiv);
   }
   
   // Añadir progreso si existe
@@ -179,6 +169,7 @@ function loadProgress() {
           if (msg.role === 'user') addMessage(msg.content, 'user');
           else if (msg.role === 'assistant') addMessage(msg.content, 'bot', msg.metadata);
         });
+        isFirstMessage = false;
       }
     } catch (err) {
       console.error("Error al cargar progreso:", err);
@@ -203,11 +194,69 @@ if (messages.length === 0) {
 
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  let text = userInput.value.trim().toUpperCase();
+  let text = userInput.value.trim();
   
   if (!text) return;
 
-  // Validar que sea A, B, C o D
+  // Si es la primera pregunta (rol), permitir cualquier texto
+  if (isFirstMessage) {
+    addMessage(text, "user");
+    userInput.value = "";
+    const submitButton = chatForm.querySelector("button");
+    submitButton.disabled = true;
+    isRequestInProgress = true;
+
+    messages.push({ role: "user", content: text });
+    
+    await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY_MS));
+
+    try {
+      console.log("Enviando rol al tutor...");
+      const result = await callWorker(text);
+      
+      if (result.type === 'initial') {
+        userState.role = text;
+        addMessage(result.content, "bot");
+        isFirstMessage = false;
+        
+        // Esperar un poco y luego pedir la primera pregunta
+        setTimeout(() => {
+          addMessage("Ahora vamos a comenzar. Responde con A, B, C o D.", "bot");
+          callWorker("Genera la primera pregunta de nivel BÁSICO sobre PRL").then(firstQuestion => {
+            if (firstQuestion.type === 'evaluation') {
+              addMessage(firstQuestion.nextQuestion, "bot", { 
+                options: firstQuestion.options,
+                progress: {
+                  questionsAsked: 0,
+                  correctAnswers: 0,
+                  currentLevel: 'BÁSICO'
+                }
+              });
+            }
+          });
+        }, 1000);
+      }
+      
+      messages.push({ 
+        role: "assistant", 
+        content: result.content,
+        metadata: {}
+      });
+      
+      saveProgress();
+      
+    } catch (err) {
+      console.error("Error completo:", err);
+      addMessage("Ha ocurrido un error. Por favor, intenta de nuevo.", "bot");
+    } finally {
+      submitButton.disabled = false;
+      isRequestInProgress = false;
+    }
+    return;
+  }
+
+  // Para preguntas posteriores, validar que sea A, B, C o D
+  text = text.toUpperCase();
   if (!/^[A-D]$/.test(text)) {
     addMessage("Por favor, responde con A, B, C o D", "bot");
     userInput.value = "";
@@ -239,11 +288,11 @@ chatForm.addEventListener("submit", async (e) => {
       if (result.isCorrect) {
         userState.correctAnswers++;
         const feedback = `✅ ¡Correcto! ${result.feedback}`;
-        addMessage(feedback, "bot", { sources: result.sources });
+        addMessage(feedback, "bot");
       } else {
         userState.incorrectAnswers++;
         const feedback = `❌ Incorrecto. ${result.feedback}\n\n**Respuesta correcta:** ${result.correctAnswer}\n\n**Justificación:** ${result.justification}`;
-        addMessage(feedback, "bot", { sources: result.sources });
+        addMessage(feedback, "bot");
       }
       
       updateProgress();
@@ -255,23 +304,22 @@ chatForm.addEventListener("submit", async (e) => {
             questionsAsked: userState.questionsAsked,
             correctAnswers: userState.correctAnswers,
             currentLevel: userState.currentLevel
-          },
-          sources: result.sources
+          }
         });
       }, 1000);
       
     } else if (result.type === 'explanation') {
-      addMessage(result.content, "bot", { sources: result.sources });
+      addMessage(result.content, "bot");
       userState.phase = 'question';
       
     } else if (result.type === 'text') {
-      addMessage(result.content, "bot", { sources: result.sources });
+      addMessage(result.content, "bot");
     }
     
     messages.push({ 
       role: "assistant", 
       content: result.content || result.nextQuestion || result.feedback,
-      metadata: { sources: result.sources }
+      metadata: {}
     });
     
     saveProgress();
