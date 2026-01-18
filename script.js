@@ -2,34 +2,27 @@
 const WORKER_URL = "https://tutor-prl2.s-morenoleiva91.workers.dev";
 const REQUEST_DELAY_MS = 1000;
 
-
 // ===== VARIABLES GLOBALES =====
 const chatContainer = document.getElementById("chat-container");
 const chatForm = document.getElementById("chat-form");
 const userInput = document.getElementById("user-input");
 
-
-// Historial de mensajes
 const messages = [];
-
 
 let userState = {
   questionsAsked: 0,
   correctAnswers: 0,
   incorrectAnswers: 0,
   currentLevel: 'BÁSICO',
-  phase: 'question', // 'question' o 'explanation'
+  phase: 'question',
   role: null,
   experience: null,
 };
 
-
 let isRequestInProgress = false;
-let currentQuestion = null; // Pregunta actual para evaluar respuesta
-
+let currentOptions = null; // Opciones de la pregunta actual
 
 // ===== FUNCIONES AUXILIARES =====
-
 
 function addMessage(text, sender = "bot", metadata = {}) {
   const div = document.createElement("div");
@@ -42,7 +35,24 @@ function addMessage(text, sender = "bot", metadata = {}) {
   
   div.innerHTML = formattedText;
   
-  // Añadir metadata si existe
+  // Añadir opciones si existen
+  if (metadata.options && Object.keys(metadata.options).length > 0) {
+    const optionsDiv = document.createElement("div");
+    optionsDiv.classList.add("options-container");
+    
+    Object.entries(metadata.options).forEach(([key, value]) => {
+      const button = document.createElement("button");
+      button.classList.add("option-button");
+      button.textContent = `${key}. ${value}`;
+      button.onclick = () => selectOption(key);
+      optionsDiv.appendChild(button);
+    });
+    
+    div.appendChild(optionsDiv);
+    currentOptions = metadata.options;
+  }
+  
+  // Añadir fuentes si existen
   if (metadata.sources && metadata.sources.length > 0) {
     const sourcesDiv = document.createElement("div");
     sourcesDiv.classList.add("sources");
@@ -60,7 +70,7 @@ function addMessage(text, sender = "bot", metadata = {}) {
     progressDiv.innerHTML = `
       <strong>📊 Progreso:</strong> 
       ${metadata.progress.correctAnswers}/${metadata.progress.questionsAsked} correctas | 
-      Nivel: <span class="level-badge">${metadata.progress.currentLevel}</span>
+      Nivel: <span class="level-badge ${metadata.progress.currentLevel}">${metadata.progress.currentLevel}</span>
     `;
     div.appendChild(progressDiv);
   }
@@ -69,6 +79,12 @@ function addMessage(text, sender = "bot", metadata = {}) {
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
+function selectOption(option) {
+  if (isRequestInProgress) return;
+  
+  userInput.value = option.toUpperCase();
+  chatForm.dispatchEvent(new Event('submit'));
+}
 
 async function callWorker(message) {
   try {
@@ -83,7 +99,6 @@ async function callWorker(message) {
       })
     });
 
-
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`Error HTTP ${response.status}:`, errorText);
@@ -96,7 +111,6 @@ async function callWorker(message) {
       }
     }
 
-
     const data = await response.json();
     return data;
   } catch (error) {
@@ -105,9 +119,7 @@ async function callWorker(message) {
   }
 }
 
-
 function updateProgress() {
-  // Actualizar nivel basado en desempeño
   const totalAnswered = userState.correctAnswers + userState.incorrectAnswers;
   
   if (totalAnswered > 0) {
@@ -129,7 +141,6 @@ function updateProgress() {
   }
 }
 
-
 function saveProgress() {
   try {
     const progress = {
@@ -147,7 +158,6 @@ function saveProgress() {
     console.error("Error al guardar progreso:", err);
   }
 }
-
 
 function loadProgress() {
   const saved = localStorage.getItem('tutorPRL_progress');
@@ -176,39 +186,38 @@ function loadProgress() {
   }
 }
 
-
 function clearProgress() {
   localStorage.removeItem('tutorPRL_progress');
   location.reload();
 }
 
-
 // ===== INICIALIZACIÓN =====
-
 
 loadProgress();
 
-
-// Mensaje inicial del tutor (solo si es primera vez)
 if (messages.length === 0) {
-  addMessage("Hola, soy tu tutor adaptativo de PRL. Vamos a trabajar con preguntas tipo test que se adaptarán a tu nivel de conocimiento. ¿Cuál es tu rol en la empresa? (comercial, back-office, IT, etc.)", "bot");
+  addMessage("Hola, soy tu tutor adaptativo de PRL. Vamos a trabajar con preguntas tipo test que se adaptarán a tu nivel de conocimiento.\n\n¿Cuál es tu rol en la empresa? (comercial, back-office, IT, etc.)", "bot");
 }
-
 
 // ===== EVENT LISTENERS =====
 
-
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const text = userInput.value.trim();
+  let text = userInput.value.trim().toUpperCase();
+  
   if (!text) return;
 
+  // Validar que sea A, B, C o D
+  if (!/^[A-D]$/.test(text)) {
+    addMessage("Por favor, responde con A, B, C o D", "bot");
+    userInput.value = "";
+    return;
+  }
 
   if (isRequestInProgress) {
     addMessage("Por favor, espera a que termine la respuesta anterior.", "bot");
     return;
   }
-
 
   addMessage(text, "user");
   userInput.value = "";
@@ -216,18 +225,15 @@ chatForm.addEventListener("submit", async (e) => {
   submitButton.disabled = true;
   isRequestInProgress = true;
 
-
   messages.push({ role: "user", content: text });
   
   await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY_MS));
 
-
   try {
-    console.log("Enviando solicitud al tutor adaptativo...");
+    console.log("Enviando respuesta al tutor...");
     const result = await callWorker(text);
     
     if (result.type === 'evaluation') {
-      // Procesar evaluación de respuesta
       userState.questionsAsked++;
       
       if (result.isCorrect) {
@@ -240,30 +246,25 @@ chatForm.addEventListener("submit", async (e) => {
         addMessage(feedback, "bot", { sources: result.sources });
       }
       
-      // Actualizar progreso
       updateProgress();
       
-      // Mostrar siguiente pregunta
       setTimeout(() => {
         addMessage(result.nextQuestion, "bot", { 
+          options: result.options,
           progress: {
             questionsAsked: userState.questionsAsked,
             correctAnswers: userState.correctAnswers,
             currentLevel: userState.currentLevel
-          }
+          },
+          sources: result.sources
         });
-        currentQuestion = result.nextQuestion;
       }, 1000);
       
     } else if (result.type === 'explanation') {
-      // Procesar explicación
       addMessage(result.content, "bot", { sources: result.sources });
-      
-      // Después de la explicación, volver a preguntas
       userState.phase = 'question';
       
     } else if (result.type === 'text') {
-      // Respuesta en texto plano
       addMessage(result.content, "bot", { sources: result.sources });
     }
     
@@ -296,6 +297,4 @@ chatForm.addEventListener("submit", async (e) => {
   }
 });
 
-
-// Guardar progreso cada 15 segundos
 setInterval(saveProgress, 15000);
