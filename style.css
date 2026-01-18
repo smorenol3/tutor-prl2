@@ -192,24 +192,6 @@ header p {
   background-color: #f44336;
 }
 
-/* ===== FUENTES PRL ===== */
-.sources {
-  margin-top: 10px;
-  padding: 10px;
-  background-color: #f0f4f8;
-  border-left: 4px solid #2196F3;
-  border-radius: 4px;
-  font-size: 0.85em;
-  color: #555;
-  font-style: italic;
-}
-
-.sources strong {
-  color: #1976D2;
-  display: block;
-  margin-bottom: 5px;
-}
-
 /* ===== FORMULARIO ===== */
 #chat-form {
   display: flex;
@@ -226,7 +208,6 @@ header p {
   border-radius: 6px;
   font-size: 1em;
   font-family: inherit;
-  text-transform: uppercase;
 }
 
 #user-input:focus {
