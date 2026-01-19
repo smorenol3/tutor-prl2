@@ -1,6 +1,6 @@
 // ============================================
-// FRONTEND CON D1 - FASE 2
-// Login + Progreso en BD
+// FRONTEND CON D1 - FASE 2 MEJORADA
+// Login + Progreso + Feedback discreto (sin popup)
 // ============================================
 
 // CONFIGURACIÓN
@@ -12,12 +12,13 @@ let correctAnswers = 0;
 let wrongAnswers = 0;
 let answered = false;
 let currentUser = null;
+let failedQuestions = []; // Rastrear preguntas fallidas
 
 // ============================================
 // AUTENTICACIÓN
 // ============================================
 
-function toggleForms( ) {
+function toggleForms() {
   document.getElementById("login-form").style.display = 
     document.getElementById("login-form").style.display === "none" ? "block" : "none";
   document.getElementById("register-form").style.display = 
@@ -198,13 +199,12 @@ function displayQuestion() {
         ${currentQuestion.question}
       </h2>
       
-      <div style="margin: 20px 0;">
+      <div style="margin: 20px 0;" id="options-container">
   `;
 
   // Mostrar opciones
   currentQuestion.options.forEach((option, index) => {
     const letter = option.charAt(0);
-    const isCorrect = letter === currentQuestion.correctAnswer;
     
     let buttonStyle = `
       display: block;
@@ -223,6 +223,7 @@ function displayQuestion() {
 
     html += `
       <button 
+        id="option-${letter}"
         onclick="selectAnswer('${letter}')"
         ${answered ? 'disabled' : ''}
         style="${buttonStyle}"
@@ -237,9 +238,13 @@ function displayQuestion() {
   html += `
       </div>
       
+      <div id="feedback-container" style="display: none; margin: 15px 0; padding: 15px; border-radius: 5px; font-size: 14px;">
+      </div>
+      
       <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd;">
         <button 
           onclick="loadQuestion()"
+          id="next-button"
           style="
             padding: 10px 20px;
             background: #007bff;
@@ -248,6 +253,7 @@ function displayQuestion() {
             border-radius: 5px;
             cursor: pointer;
             font-size: 14px;
+            display: none;
           "
         >
           ↻ Siguiente pregunta
@@ -317,12 +323,27 @@ async function selectAnswer(letter) {
   answered = true;
   const isCorrect = letter === currentQuestion.correctAnswer;
   
+  // Marcar la opción seleccionada
+  const selectedButton = document.getElementById(`option-${letter}`);
+  const correctButton = document.getElementById(`option-${currentQuestion.correctAnswer}`);
+  
+  if (isCorrect) {
+    selectedButton.style.background = "#d4edda";
+    selectedButton.style.borderColor = "#28a745";
+  } else {
+    selectedButton.style.background = "#f8d7da";
+    selectedButton.style.borderColor = "#dc3545";
+    correctButton.style.background = "#d4edda";
+    correctButton.style.borderColor = "#28a745";
+  }
+  
   // Actualizar estadísticas
   questionsAnswered++;
   if (isCorrect) {
     correctAnswers++;
   } else {
     wrongAnswers++;
+    failedQuestions.push(currentQuestion.id);
   }
 
   // Guardar en BD
@@ -342,17 +363,37 @@ async function selectAnswer(letter) {
     console.error("Error guardando progreso:", error);
   }
 
-  // Mostrar feedback
-  const feedback = isCorrect 
-    ? `✅ ¡CORRECTO!\n\n${currentQuestion.explanation}`
-    : `❌ INCORRECTO\n\nRespuesta correcta: ${currentQuestion.correctAnswer}\n\n${currentQuestion.explanation}`;
+  // Mostrar feedback discreto
+  const feedbackContainer = document.getElementById("feedback-container");
+  feedbackContainer.style.display = "block";
   
-  alert(feedback);
-  
-  // Cargar siguiente pregunta
-  setTimeout(() => {
-    loadQuestion();
-  }, 500);
+  if (isCorrect) {
+    feedbackContainer.style.background = "#d4edda";
+    feedbackContainer.style.color = "#155724";
+    feedbackContainer.style.borderLeft = "4px solid #28a745";
+    feedbackContainer.innerHTML = `
+      <strong>✅ ¡Correcto!</strong><br>
+      ${currentQuestion.explanation}
+    `;
+  } else {
+    feedbackContainer.style.background = "#f8d7da";
+    feedbackContainer.style.color = "#721c24";
+    feedbackContainer.style.borderLeft = "4px solid #dc3545";
+    feedbackContainer.innerHTML = `
+      <strong>❌ Incorrecto</strong><br>
+      <strong>Respuesta correcta:</strong> ${currentQuestion.correctAnswer}<br><br>
+      ${currentQuestion.explanation}
+    `;
+  }
+
+  // Mostrar botón siguiente
+  document.getElementById("next-button").style.display = "inline-block";
+
+  // Deshabilitar todas las opciones
+  document.querySelectorAll("#options-container button").forEach(btn => {
+    btn.disabled = true;
+    btn.style.cursor = "default";
+  });
 }
 
 // ============================================
