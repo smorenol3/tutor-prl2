@@ -14,15 +14,14 @@ let userState = {
   correctAnswers: 0,
   incorrectAnswers: 0,
   currentLevel: 'BÁSICO',
-  phase: 'question',
+  phase: 'role', // NUEVA: Comenzar en fase 'role'
   role: null,
   experience: null,
 };
 
-let currentQuestion = null; // NUEVA: Guardar la pregunta actual
+let currentQuestion = null;
 let isRequestInProgress = false;
 let currentOptions = null;
-let isFirstMessage = true;
 
 // ===== FUNCIONES AUXILIARES =====
 
@@ -95,7 +94,6 @@ async function callWorker(message, includeCurrentQuestion = false) {
       userState 
     };
     
-    // NUEVA: Incluir la pregunta actual si es necesario
     if (includeCurrentQuestion && currentQuestion) {
       payload.currentQuestion = currentQuestion;
     }
@@ -180,7 +178,7 @@ function loadProgress() {
       userState.correctAnswers = progress.correctAnswers || 0;
       userState.incorrectAnswers = progress.incorrectAnswers || 0;
       userState.currentLevel = progress.currentLevel || 'BÁSICO';
-      userState.phase = progress.phase || 'question';
+      userState.phase = progress.phase || 'role';
       userState.role = progress.role || null;
       userState.experience = progress.experience || null;
       
@@ -190,7 +188,6 @@ function loadProgress() {
           if (msg.role === 'user') addMessage(msg.content, 'user');
           else if (msg.role === 'assistant') addMessage(msg.content, 'bot', msg.metadata);
         });
-        isFirstMessage = false;
       }
     } catch (err) {
       console.error("Error al cargar progreso:", err);
@@ -209,6 +206,7 @@ loadProgress();
 
 if (messages.length === 0) {
   addMessage("Hola, soy tu tutor adaptativo de PRL. Vamos a trabajar con preguntas tipo test que se adaptarán a tu nivel de conocimiento.\n\n¿Cuál es tu rol en la empresa? (comercial, back-office, IT, etc.)", "bot");
+  userState.phase = 'role';
 }
 
 // ===== EVENT LISTENERS =====
@@ -219,8 +217,8 @@ chatForm.addEventListener("submit", async (e) => {
   
   if (!text) return;
 
-  // Si es la primera pregunta (rol), permitir cualquier texto
-  if (isFirstMessage) {
+  // ===== FASE 1: OBTENER ROL =====
+  if (userState.phase === 'role') {
     addMessage(text, "user");
     userInput.value = "";
     const submitButton = chatForm.querySelector("button");
@@ -237,15 +235,21 @@ chatForm.addEventListener("submit", async (e) => {
       
       if (result.type === 'initial') {
         userState.role = text;
+        userState.phase = 'question'; // CAMBIAR A FASE QUESTION
         addMessage(result.content, "bot");
-        isFirstMessage = false;
         
-        // Esperar un poco y luego pedir la primera pregunta
+        messages.push({ 
+          role: "assistant", 
+          content: result.content,
+          metadata: {}
+        });
+        
+        // NUEVA: Generar la PRIMERA pregunta
         setTimeout(() => {
-          addMessage("Ahora vamos a comenzar. Responde con A, B, C o D.", "bot");
-          callWorker("Genera la primera pregunta de nivel BÁSICO sobre PRL").then(firstQuestion => {
+          console.log("Generando primera pregunta...");
+          callWorker("Genera la primera pregunta de nivel BÁSICO sobre PRL con 4 opciones (A, B, C, D)").then(firstQuestion => {
             if (firstQuestion.type === 'evaluation') {
-              // NUEVA: Guardar la pregunta actual
+              // Guardar la pregunta actual
               currentQuestion = {
                 text: firstQuestion.nextQuestion,
                 options: firstQuestion.options,
@@ -260,16 +264,15 @@ chatForm.addEventListener("submit", async (e) => {
                   currentLevel: 'BÁSICO'
                 }
               });
+              
+              saveProgress();
             }
+          }).catch(err => {
+            console.error("Error generando primera pregunta:", err);
+            addMessage("Error al generar la primera pregunta. Por favor, intenta de nuevo.", "bot");
           });
         }, 1000);
       }
-      
-      messages.push({ 
-        role: "assistant", 
-        content: result.content,
-        metadata: {}
-      });
       
       saveProgress();
       
@@ -283,148 +286,151 @@ chatForm.addEventListener("submit", async (e) => {
     return;
   }
 
-  // Para preguntas posteriores, validar que sea A, B, C o D
-  text = text.toUpperCase();
-  if (!/^[A-D]$/.test(text)) {
-    addMessage("Por favor, responde con A, B, C o D", "bot");
+  // ===== FASE 2: RESPONDER PREGUNTAS =====
+  if (userState.phase === 'question') {
+    // Validar que sea A, B, C o D
+    text = text.toUpperCase();
+    if (!/^[A-D]$/.test(text)) {
+      addMessage("Por favor, responde con A, B, C o D", "bot");
+      userInput.value = "";
+      return;
+    }
+
+    if (isRequestInProgress) {
+      addMessage("Por favor, espera a que termine la respuesta anterior.", "bot");
+      return;
+    }
+
+    addMessage(text, "user");
     userInput.value = "";
-    return;
-  }
+    const submitButton = chatForm.querySelector("button");
+    submitButton.disabled = true;
+    isRequestInProgress = true;
 
-  if (isRequestInProgress) {
-    addMessage("Por favor, espera a que termine la respuesta anterior.", "bot");
-    return;
-  }
-
-  addMessage(text, "user");
-  userInput.value = "";
-  const submitButton = chatForm.querySelector("button");
-  submitButton.disabled = true;
-  isRequestInProgress = true;
-
-  messages.push({ role: "user", content: text });
-  
-  await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY_MS));
-
-  try {
-    console.log("Enviando respuesta al tutor...");
-    // NUEVA: Incluir currentQuestion en la llamada
-    const result = await callWorker(text, true);
+    messages.push({ role: "user", content: text });
     
-    if (result.type === 'evaluation') {
-      userState.questionsAsked++;
+    await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY_MS));
+
+    try {
+      console.log("Enviando respuesta al tutor...");
+      // Incluir currentQuestion en la llamada
+      const result = await callWorker(text, true);
       
-      if (result.isCorrect) {
-        userState.correctAnswers++;
-        const feedback = `✅ ¡Correcto! ${result.feedback}`;
-        addMessage(feedback, "bot");
-      } else {
-        userState.incorrectAnswers++;
-        const feedback = `❌ Incorrecto. ${result.feedback}\n\n**Respuesta correcta:** ${result.correctAnswer}\n\n**Justificación:** ${result.justification}`;
-        addMessage(feedback, "bot");
-      }
-      
-      // Verificar cambio de nivel
-      const levelChanged = updateProgress();
-      
-      if (levelChanged) {
-        // Si hay cambio de nivel, mostrar mensaje y luego pedir explicación
-        const newLevel = userState.currentLevel;
-        const levelMessages = {
-          'BÁSICO': "ℹ️ Vamos a volver a nivel BÁSICO para reforzar fundamentos.",
-          'MEDIO': "🎉 ¡Felicidades! Has subido a nivel MEDIO. Las preguntas serán más desafiantes.",
-          'AVANZADO': "🏆 ¡Excelente! Has alcanzado nivel AVANZADO. Prepárate para preguntas complejas."
-        };
+      if (result.type === 'evaluation') {
+        userState.questionsAsked++;
         
-        addMessage(levelMessages[newLevel], "bot");
+        if (result.isCorrect) {
+          userState.correctAnswers++;
+          const feedback = `✅ ¡Correcto! ${result.feedback}`;
+          addMessage(feedback, "bot");
+        } else {
+          userState.incorrectAnswers++;
+          const feedback = `❌ Incorrecto. ${result.feedback}\n\n**Respuesta correcta:** ${result.correctAnswer}\n\n**Justificación:** ${result.justification}`;
+          addMessage(feedback, "bot");
+        }
         
-        // Después del cambio de nivel, pedir explicación
-        setTimeout(() => {
-          console.log("Pidiendo explicación después de cambio de nivel...");
-          callWorker("Proporciona una explicación educativa sobre PRL para consolidar conocimientos").then(explanation => {
-            if (explanation.type === 'explanation') {
-              addMessage(explanation.content, "bot");
-              
-              // Después de la explicación, pedir nueva pregunta
-              setTimeout(() => {
-                callWorker(`Genera una nueva pregunta de nivel ${userState.currentLevel} sobre PRL`).then(nextQ => {
-                  if (nextQ.type === 'evaluation') {
-                    // NUEVA: Guardar la pregunta actual
-                    currentQuestion = {
-                      text: nextQ.nextQuestion,
-                      options: nextQ.options,
-                      correctAnswer: nextQ.correctAnswer
-                    };
-                    
-                    addMessage(nextQ.nextQuestion, "bot", { 
-                      options: nextQ.options,
-                      progress: {
-                        questionsAsked: userState.questionsAsked,
-                        correctAnswers: userState.correctAnswers,
-                        currentLevel: userState.currentLevel
-                      }
-                    });
-                  }
-                });
-              }, 1000);
-            }
-          });
-        }, 1500);
-      } else {
-        // Sin cambio de nivel, mostrar siguiente pregunta directamente
-        setTimeout(() => {
-          // NUEVA: Guardar la pregunta actual
-          currentQuestion = {
-            text: result.nextQuestion,
-            options: result.options,
-            correctAnswer: result.correctAnswer
+        // Verificar cambio de nivel
+        const levelChanged = updateProgress();
+        
+        if (levelChanged) {
+          // Si hay cambio de nivel, mostrar mensaje y luego pedir explicación
+          const newLevel = userState.currentLevel;
+          const levelMessages = {
+            'BÁSICO': "ℹ️ Vamos a volver a nivel BÁSICO para reforzar fundamentos.",
+            'MEDIO': "🎉 ¡Felicidades! Has subido a nivel MEDIO. Las preguntas serán más desafiantes.",
+            'AVANZADO': "🏆 ¡Excelente! Has alcanzado nivel AVANZADO. Prepárate para preguntas complejas."
           };
           
-          addMessage(result.nextQuestion, "bot", { 
-            options: result.options,
-            progress: {
-              questionsAsked: userState.questionsAsked,
-              correctAnswers: userState.correctAnswers,
-              currentLevel: userState.currentLevel
-            }
-          });
-        }, 1000);
+          addMessage(levelMessages[newLevel], "bot");
+          
+          // Después del cambio de nivel, pedir explicación
+          setTimeout(() => {
+            console.log("Pidiendo explicación después de cambio de nivel...");
+            callWorker("Proporciona una explicación educativa sobre PRL para consolidar conocimientos").then(explanation => {
+              if (explanation.type === 'explanation') {
+                addMessage(explanation.content, "bot");
+                
+                // Después de la explicación, pedir nueva pregunta
+                setTimeout(() => {
+                  callWorker(`Genera una nueva pregunta de nivel ${userState.currentLevel} sobre PRL con 4 opciones (A, B, C, D)`).then(nextQ => {
+                    if (nextQ.type === 'evaluation') {
+                      // Guardar la pregunta actual
+                      currentQuestion = {
+                        text: nextQ.nextQuestion,
+                        options: nextQ.options,
+                        correctAnswer: nextQ.correctAnswer
+                      };
+                      
+                      addMessage(nextQ.nextQuestion, "bot", { 
+                        options: nextQ.options,
+                        progress: {
+                          questionsAsked: userState.questionsAsked,
+                          correctAnswers: userState.correctAnswers,
+                          currentLevel: userState.currentLevel
+                        }
+                      });
+                    }
+                  });
+                }, 1000);
+              }
+            });
+          }, 1500);
+        } else {
+          // Sin cambio de nivel, mostrar siguiente pregunta directamente
+          setTimeout(() => {
+            // Guardar la pregunta actual
+            currentQuestion = {
+              text: result.nextQuestion,
+              options: result.options,
+              correctAnswer: result.correctAnswer
+            };
+            
+            addMessage(result.nextQuestion, "bot", { 
+              options: result.options,
+              progress: {
+                questionsAsked: userState.questionsAsked,
+                correctAnswers: userState.correctAnswers,
+                currentLevel: userState.currentLevel
+              }
+            });
+          }, 1000);
+        }
+        
+      } else if (result.type === 'explanation') {
+        addMessage(result.content, "bot");
+        userState.phase = 'question';
+        
+      } else if (result.type === 'text') {
+        addMessage(result.content, "bot");
       }
       
-    } else if (result.type === 'explanation') {
-      addMessage(result.content, "bot");
-      userState.phase = 'question';
+      messages.push({ 
+        role: "assistant", 
+        content: result.content || result.nextQuestion || result.feedback,
+        metadata: {}
+      });
       
-    } else if (result.type === 'text') {
-      addMessage(result.content, "bot");
+      saveProgress();
+      console.log(`Progreso: ${userState.correctAnswers}/${userState.questionsAsked} correctas`);
+      
+    } catch (err) {
+      console.error("Error completo:", err);
+      
+      let errorMsg = "Ha ocurrido un error al contactar con el tutor.";
+      
+      if (err.message.includes("Failed to fetch")) {
+        errorMsg = "Error de conexión. Verifica que el worker de Cloudflare está activo.";
+      } else if (err.message.includes("rate limited")) {
+        errorMsg = "El servicio está siendo utilizado mucho en este momento. Por favor, espera unos segundos e intenta de nuevo.";
+      } else if (err.message.includes("HTTP")) {
+        errorMsg = `Error del servidor: ${err.message}`;
+      }
+      
+      addMessage(errorMsg + " Por favor, intenta de nuevo.", "bot");
+    } finally {
+      submitButton.disabled = false;
+      isRequestInProgress = false;
     }
-    
-    messages.push({ 
-      role: "assistant", 
-      content: result.content || result.nextQuestion || result.feedback,
-      metadata: {}
-    });
-    
-    saveProgress();
-    console.log(`Progreso: ${userState.correctAnswers}/${userState.questionsAsked} correctas`);
-    
-  } catch (err) {
-    console.error("Error completo:", err);
-    
-    let errorMsg = "Ha ocurrido un error al contactar con el tutor.";
-    
-    if (err.message.includes("Failed to fetch")) {
-      errorMsg = "Error de conexión. Verifica que el worker de Cloudflare está activo.";
-    } else if (err.message.includes("rate limited")) {
-      errorMsg = "El servicio está siendo utilizado mucho en este momento. Por favor, espera unos segundos e intenta de nuevo.";
-    } else if (err.message.includes("HTTP")) {
-      errorMsg = `Error del servidor: ${err.message}`;
-    }
-    
-    addMessage(errorMsg + " Por favor, intenta de nuevo.", "bot");
-  } finally {
-    submitButton.disabled = false;
-    isRequestInProgress = false;
   }
 });
 
