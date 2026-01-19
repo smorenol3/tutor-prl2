@@ -1,6 +1,6 @@
 // ============================================
-// FRONTEND ADAPTATIVO CORREGIDO
-// Nivel automático + Explicaciones LLM cada 5 preguntas
+// FRONTEND ADAPTATIVO V2 - CORREGIDO
+// Limpia correctamente las preguntas fallidas
 // ============================================
 
 // CONFIGURACIÓN
@@ -9,24 +9,18 @@ let currentQuestion = null;
 let currentLevel = "BÁSICO";
 let currentUser = null;
 
-// Estadísticas por nivel (separadas)
+// Estadísticas por nivel (se resetean al cambiar de nivel)
 let levelStats = {
   "BÁSICO": { total: 0, correct: 0 },
   "MEDIO": { total: 0, correct: 0 },
   "AVANZADO": { total: 0, correct: 0 }
 };
 
-// Preguntas fallidas en la sesión actual
-let failedQuestionsSession = [];
-
-// Preguntas ya respondidas (para no repetir)
-let answeredQuestions = [];
-
-// Contador de preguntas desde última explicación
-let questionsSinceExplanation = 0;
-
-// Estado
+// Preguntas fallidas en el bloque actual (últimas 5)
+let currentBlockFailed = [];
+let questionsInCurrentBlock = 0;
 let answered = false;
+let answeredQuestionIds = [];
 
 // ============================================
 // AUTENTICACIÓN
@@ -44,7 +38,7 @@ async function handleRegister() {
   const password = document.getElementById("register-password").value.trim();
   
   if (!username || !password) {
-    showError("Por favor, completa todos los campos");
+    alert("Por favor, completa todos los campos");
     return;
   }
   
@@ -58,18 +52,14 @@ async function handleRegister() {
     const data = await response.json();
     
     if (data.error) {
-      showError(data.error);
+      alert("Error: " + data.error);
       return;
     }
     
-    // Auto-login después de registro
-    currentUser = { id: data.userId, username: data.username };
-    localStorage.setItem("tutor_user", JSON.stringify(currentUser));
-    
-    showQuizScreen();
+    alert("¡Cuenta creada! Ahora puedes iniciar sesión.");
+    toggleForms();
   } catch (error) {
-    console.error("Error en registro:", error);
-    showError("Error de conexión");
+    alert("Error de conexión: " + error.message);
   }
 }
 
@@ -78,7 +68,7 @@ async function handleLogin() {
   const password = document.getElementById("login-password").value.trim();
   
   if (!username || !password) {
-    showError("Por favor, completa todos los campos");
+    alert("Por favor, completa todos los campos");
     return;
   }
   
@@ -92,17 +82,22 @@ async function handleLogin() {
     const data = await response.json();
     
     if (data.error) {
-      showError(data.error);
+      alert("Error: " + data.error);
       return;
     }
     
-    currentUser = { id: data.userId, username: data.username };
-    localStorage.setItem("tutor_user", JSON.stringify(currentUser));
+    currentUser = data;
+    localStorage.setItem("tutor_user", JSON.stringify(data));
     
-    showQuizScreen();
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("quiz-screen").style.display = "block";
+    document.getElementById("current-user").textContent = currentUser.username;
+    
+    // Cargar nivel y progreso del usuario
+    await loadUserLevel();
+    loadQuestion();
   } catch (error) {
-    console.error("Error en login:", error);
-    showError("Error de conexión");
+    alert("Error de conexión: " + error.message);
   }
 }
 
@@ -116,44 +111,27 @@ function logout() {
     "MEDIO": { total: 0, correct: 0 },
     "AVANZADO": { total: 0, correct: 0 }
   };
-  failedQuestionsSession = [];
-  answeredQuestions = [];
-  questionsSinceExplanation = 0;
+  currentBlockFailed = [];
+  questionsInCurrentBlock = 0;
+  answeredQuestionIds = [];
   
   document.getElementById("login-screen").style.display = "block";
   document.getElementById("quiz-screen").style.display = "none";
 }
 
-function showError(message) {
-  alert(message);
-}
-
 // ============================================
-// PANTALLA DE QUIZ
+// CARGAR NIVEL DEL USUARIO
 // ============================================
 
-async function showQuizScreen() {
-  document.getElementById("login-screen").style.display = "none";
-  document.getElementById("quiz-screen").style.display = "block";
-  document.getElementById("current-user").textContent = currentUser.username;
-  
-  // Cargar progreso del usuario desde BD
-  await loadUserProgress();
-  
-  // Determinar nivel inicial
-  await determineUserLevel();
-  
-  // Cargar primera pregunta
-  loadQuestion();
-}
-
-async function loadUserProgress() {
+async function loadUserLevel() {
   try {
-    const response = await fetch(`${WORKER_URL}/api/progress?userId=${currentUser.id}`);
+    const response = await fetch(`${WORKER_URL}/api/user/level?userId=${currentUser.userId}`);
     const data = await response.json();
     
+    currentLevel = data.level || "BÁSICO";
+    
+    // Cargar estadísticas históricas
     if (data.stats) {
-      // Cargar estadísticas por nivel desde BD
       data.stats.forEach(stat => {
         if (levelStats[stat.level]) {
           levelStats[stat.level].total = stat.total;
@@ -162,28 +140,10 @@ async function loadUserProgress() {
       });
     }
     
-    if (data.failedQuestions) {
-      // Cargar preguntas fallidas
-      failedQuestionsSession = data.failedQuestions.map(q => q.question_id);
-    }
-    
-    updateProgressDisplay();
+    console.log(`Nivel actual: ${currentLevel}`);
+    console.log("Estadísticas:", levelStats);
   } catch (error) {
-    console.error("Error cargando progreso:", error);
-  }
-}
-
-async function determineUserLevel() {
-  try {
-    const response = await fetch(`${WORKER_URL}/api/user/level?userId=${currentUser.id}`);
-    const data = await response.json();
-    
-    if (data.level) {
-      currentLevel = data.level;
-      console.log(`Nivel determinado: ${currentLevel}`);
-    }
-  } catch (error) {
-    console.error("Error determinando nivel:", error);
+    console.error("Error cargando nivel:", error);
     currentLevel = "BÁSICO";
   }
 }
@@ -193,30 +153,35 @@ async function determineUserLevel() {
 // ============================================
 
 async function loadQuestion() {
-  answered = false;
-  
   try {
-    // Excluir preguntas ya respondidas en esta sesión
-    const excludeIds = answeredQuestions.join(",");
+    const container = document.getElementById("question-container");
+    container.innerHTML = `
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Cargando pregunta...</p>
+      </div>
+    `;
     
-    const response = await fetch(
-      `${WORKER_URL}/api/questions/random?level=${currentLevel}&exclude=${excludeIds}`
-    );
+    // Excluir preguntas ya respondidas en esta sesión
+    const excludeIds = answeredQuestionIds.join(",");
+    const response = await fetch(`${WORKER_URL}/api/questions/random?level=${currentLevel}&exclude=${excludeIds}`);
     
     if (!response.ok) {
       throw new Error(`Error: ${response.status}`);
     }
     
     currentQuestion = await response.json();
-    console.log("Pregunta cargada:", currentQuestion);
+    answered = false;
     
     displayQuestion();
+    updateProgressDisplay();
   } catch (error) {
     console.error("Error cargando pregunta:", error);
     document.getElementById("question-container").innerHTML = `
       <div style="color: red; padding: 20px; background: #ffe0e0; border-radius: 8px;">
-        <strong>Error cargando pregunta</strong><br>
-        ${error.message}
+        <strong>Error:</strong> ${error.message}
+        <br><br>
+        <button onclick="loadQuestion()" style="padding: 10px 20px; cursor: pointer;">Reintentar</button>
       </div>
     `;
   }
@@ -229,87 +194,74 @@ async function loadQuestion() {
 function displayQuestion() {
   const container = document.getElementById("question-container");
   
-  const levelColor = {
-    "BÁSICO": "#28a745",
-    "MEDIO": "#ffc107", 
-    "AVANZADO": "#dc3545"
-  };
-  
-  let html = `
-    <div style="margin-bottom: 15px;">
-      <span style="
-        background: ${levelColor[currentLevel]};
-        color: ${currentLevel === 'MEDIO' ? 'black' : 'white'};
-        padding: 5px 15px;
-        border-radius: 20px;
-        font-size: 14px;
-        font-weight: bold;
-      ">
-        Nivel: ${currentLevel}
-      </span>
-      <span style="color: #666; margin-left: 10px; font-size: 14px;">
-        Pregunta ID: ${currentQuestion.id}
-      </span>
-    </div>
-    
-    <h3 style="margin-bottom: 20px; color: #333; line-height: 1.5;">
-      ${currentQuestion.question}
-    </h3>
-    
-    <div id="options-container">
-  `;
-  
-  const options = ["A", "B", "C", "D"];
-  options.forEach(letter => {
-    html += `
-      <button 
-        id="option-${letter}"
-        onclick="selectAnswer('${letter}')"
-        style="
-          display: block;
-          width: 100%;
-          padding: 15px 20px;
-          margin-bottom: 10px;
-          border: 2px solid #e0e0e0;
-          border-radius: 8px;
-          background: white;
-          text-align: left;
-          font-size: 16px;
-          cursor: pointer;
-          transition: all 0.2s;
-        "
-        onmouseover="if(!${answered}) this.style.borderColor='#667eea'"
-        onmouseout="if(!${answered}) this.style.borderColor='#e0e0e0'"
-      >
-        <strong>${letter})</strong> ${currentQuestion.options[letter]}
-      </button>
-    `;
-  });
-  
-  html += `
-    </div>
-    
-    <div id="feedback-container" style="display: none; margin-top: 20px;"></div>
-    
-    <div id="next-button-container" style="display: none; margin-top: 20px; text-align: center;">
-      <button 
-        onclick="handleNextQuestion()"
-        style="
-          padding: 12px 30px;
-          background: #667eea;
-          color: white;
-          border: none;
-          border-radius: 8px;
-          font-size: 16px;
-          cursor: pointer;
-        "
-      >
-        Siguiente pregunta →
-      </button>
+  const html = `
+    <div class="question-card">
+      <div class="question-header">
+        <span class="level-badge level-${currentLevel.toLowerCase()}">${currentLevel}</span>
+        <span class="question-id">Pregunta #${currentQuestion.id}</span>
+      </div>
+      
+      <h2 class="question-text">${currentQuestion.question}</h2>
+      
+      <div class="options-container" id="options-container">
+        ${Object.entries(currentQuestion.options).map(([letter, text]) => `
+          <button class="option-btn" id="option-${letter}" onclick="selectAnswer('${letter}')">
+            <span class="option-letter">${letter}</span>
+            <span class="option-text">${text}</span>
+          </button>
+        `).join("")}
+      </div>
+      
+      <div id="feedback-container" style="display: none;"></div>
+      
+      <div id="next-btn-container" style="display: none; margin-top: 20px; text-align: center;">
+        <button class="btn-next" onclick="loadQuestion()">Siguiente pregunta →</button>
+      </div>
     </div>
   `;
   
   container.innerHTML = html;
+}
+
+// ============================================
+// ACTUALIZAR DISPLAY DE PROGRESO
+// ============================================
+
+function updateProgressDisplay() {
+  const stats = levelStats[currentLevel];
+  const percentage = stats.total > 0 ? ((stats.correct / stats.total) * 100).toFixed(1) : 0;
+  
+  const progressHtml = `
+    <div class="progress-card">
+      <div class="progress-header">
+        <span class="progress-title">📊 Progreso en nivel ${currentLevel}</span>
+      </div>
+      <div class="progress-stats">
+        <div class="stat">
+          <span class="stat-value">${stats.total}</span>
+          <span class="stat-label">Respondidas</span>
+        </div>
+        <div class="stat correct">
+          <span class="stat-value">${stats.correct}</span>
+          <span class="stat-label">Correctas</span>
+        </div>
+        <div class="stat wrong">
+          <span class="stat-value">${stats.total - stats.correct}</span>
+          <span class="stat-label">Incorrectas</span>
+        </div>
+        <div class="stat percentage">
+          <span class="stat-value">${percentage}%</span>
+          <span class="stat-label">Acierto</span>
+        </div>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" style="width: ${percentage}%"></div>
+      </div>
+      <p class="progress-hint">Necesitas 80% de acierto para subir de nivel</p>
+    </div>
+  `;
+  
+  document.getElementById("progress-display").innerHTML = progressHtml;
 }
 
 // ============================================
@@ -327,30 +279,56 @@ async function selectAnswer(letter) {
   if (isCorrect) {
     levelStats[currentLevel].correct++;
   } else {
-    // Guardar pregunta fallida
-    if (!failedQuestionsSession.includes(currentQuestion.id)) {
-      failedQuestionsSession.push(currentQuestion.id);
-    }
+    // Guardar pregunta fallida para este bloque
+    currentBlockFailed.push(currentQuestion.id);
   }
   
-  // Marcar pregunta como respondida
-  if (!answeredQuestions.includes(currentQuestion.id)) {
-    answeredQuestions.push(currentQuestion.id);
+  // Incrementar contador del bloque
+  questionsInCurrentBlock++;
+  
+  // Agregar a preguntas respondidas
+  answeredQuestionIds.push(currentQuestion.id);
+  
+  // Deshabilitar opciones
+  document.querySelectorAll(".option-btn").forEach(btn => {
+    btn.disabled = true;
+    btn.style.cursor = "default";
+  });
+  
+  // Marcar respuesta correcta e incorrecta
+  const selectedBtn = document.getElementById(`option-${letter}`);
+  const correctBtn = document.getElementById(`option-${currentQuestion.correctAnswer}`);
+  
+  if (isCorrect) {
+    selectedBtn.classList.add("correct");
+  } else {
+    selectedBtn.classList.add("wrong");
+    correctBtn.classList.add("correct");
   }
   
-  // Incrementar contador
-  questionsSinceExplanation++;
+  // Mostrar feedback
+  const feedbackContainer = document.getElementById("feedback-container");
+  feedbackContainer.style.display = "block";
+  feedbackContainer.innerHTML = `
+    <div class="feedback ${isCorrect ? 'feedback-correct' : 'feedback-wrong'}">
+      <div class="feedback-icon">${isCorrect ? '✅' : '❌'}</div>
+      <div class="feedback-text">
+        <strong>${isCorrect ? '¡Correcto!' : 'Incorrecto'}</strong>
+        <p>${currentQuestion.explanation}</p>
+      </div>
+    </div>
+  `;
   
-  // Actualizar display
-  updateProgressDisplay();
+  // Mostrar botón siguiente
+  document.getElementById("next-btn-container").style.display = "block";
   
-  // Guardar en BD
+  // Guardar progreso en BD
   try {
     await fetch(`${WORKER_URL}/api/progress`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        userId: currentUser.id,
+        userId: currentUser.userId,
         questionId: currentQuestion.id,
         answer: letter,
         isCorrect: isCorrect,
@@ -361,375 +339,529 @@ async function selectAnswer(letter) {
     console.error("Error guardando progreso:", error);
   }
   
-  // Mostrar feedback visual
-  showFeedback(letter, isCorrect);
+  // Actualizar display
+  updateProgressDisplay();
   
-  // Deshabilitar opciones
-  disableOptions();
-  
-  // Mostrar botón siguiente
-  document.getElementById("next-button-container").style.display = "block";
-}
-
-function showFeedback(selectedLetter, isCorrect) {
-  const options = ["A", "B", "C", "D"];
-  
-  options.forEach(letter => {
-    const btn = document.getElementById(`option-${letter}`);
-    if (!btn) return;
-    
-    if (letter === currentQuestion.correctAnswer) {
-      // Respuesta correcta - verde
-      btn.style.borderColor = "#28a745";
-      btn.style.background = "#d4edda";
-    } else if (letter === selectedLetter && !isCorrect) {
-      // Respuesta incorrecta seleccionada - rojo
-      btn.style.borderColor = "#dc3545";
-      btn.style.background = "#f8d7da";
-    }
-  });
-  
-  // Mostrar explicación
-  const feedbackContainer = document.getElementById("feedback-container");
-  feedbackContainer.style.display = "block";
-  feedbackContainer.innerHTML = `
-    <div style="
-      padding: 20px;
-      border-radius: 8px;
-      background: ${isCorrect ? '#d4edda' : '#f8d7da'};
-      border: 1px solid ${isCorrect ? '#28a745' : '#dc3545'};
-    ">
-      <strong style="color: ${isCorrect ? '#155724' : '#721c24'};">
-        ${isCorrect ? '✅ ¡Correcto!' : '❌ Incorrecto'}
-      </strong>
-      <p style="margin-top: 10px; color: #333;">
-        ${currentQuestion.explanation}
-      </p>
-    </div>
-  `;
-}
-
-function disableOptions() {
-  const options = ["A", "B", "C", "D"];
-  options.forEach(letter => {
-    const btn = document.getElementById(`option-${letter}`);
-    if (btn) {
-      btn.style.cursor = "default";
-      btn.onclick = null;
-    }
-  });
-}
-
-// ============================================
-// SIGUIENTE PREGUNTA
-// ============================================
-
-async function handleNextQuestion() {
-  // Verificar si toca explicación (cada 5 preguntas)
-  if (questionsSinceExplanation >= 5) {
-    await showExplanationModal();
-    questionsSinceExplanation = 0;
-    
-    // Verificar cambio de nivel después de la explicación
-    await checkLevelChange();
+  // Verificar si completamos un bloque de 5 preguntas
+  if (questionsInCurrentBlock >= 5) {
+    // Esperar un momento y mostrar resumen
+    setTimeout(() => {
+      showBlockSummary();
+    }, 1500);
   }
-  
-  loadQuestion();
 }
 
 // ============================================
-// CAMBIO DE NIVEL AUTOMÁTICO
+// MOSTRAR RESUMEN DEL BLOQUE
 // ============================================
 
-async function checkLevelChange() {
+async function showBlockSummary() {
   const stats = levelStats[currentLevel];
+  const percentage = stats.total > 0 ? ((stats.correct / stats.total) * 100).toFixed(1) : 0;
   
-  if (stats.total < 5) {
-    console.log(`Nivel ${currentLevel}: Solo ${stats.total} preguntas, necesitas al menos 5`);
-    return;
-  }
+  // Crear modal
+  const modal = document.createElement("div");
+  modal.className = "modal-overlay";
+  modal.id = "summary-modal";
   
-  const percentage = (stats.correct / stats.total) * 100;
-  console.log(`Nivel ${currentLevel}: ${percentage.toFixed(1)}% (${stats.correct}/${stats.total})`);
+  let levelChangeMessage = "";
+  let newLevel = currentLevel;
   
-  if (percentage >= 80) {
-    // Subir de nivel
+  // Verificar si sube de nivel
+  if (parseFloat(percentage) >= 80 && stats.total >= 5) {
     if (currentLevel === "BÁSICO") {
-      currentLevel = "MEDIO";
-      showLevelUpNotification("MEDIO");
+      newLevel = "MEDIO";
+      levelChangeMessage = `<div class="level-up-message">🎉 ¡Felicidades! Has alcanzado el 80% de aciertos. ¡Subes al nivel MEDIO!</div>`;
     } else if (currentLevel === "MEDIO") {
-      currentLevel = "AVANZADO";
-      showLevelUpNotification("AVANZADO");
+      newLevel = "AVANZADO";
+      levelChangeMessage = `<div class="level-up-message">🎉 ¡Excelente! Has alcanzado el 80% de aciertos. ¡Subes al nivel AVANZADO!</div>`;
+    } else {
+      levelChangeMessage = `<div class="level-up-message">🏆 ¡Increíble! Estás dominando el nivel AVANZADO. ¡Sigue así!</div>`;
     }
-    
-    // Resetear estadísticas del nuevo nivel
-    levelStats[currentLevel] = { total: 0, correct: 0 };
-    
-    // Limpiar preguntas fallidas de la sesión
-    failedQuestionsSession = [];
-    answeredQuestions = [];
   }
-}
-
-function showLevelUpNotification(newLevel) {
-  const modal = document.createElement("div");
-  modal.id = "level-up-modal";
-  modal.innerHTML = `
-    <div style="
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0,0,0,0.7);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    ">
-      <div style="
-        background: white;
-        padding: 40px;
-        border-radius: 16px;
-        max-width: 400px;
-        text-align: center;
-        animation: scaleIn 0.3s ease;
-      ">
-        <div style="font-size: 60px; margin-bottom: 20px;">🎉</div>
-        <h2 style="color: #333; margin-bottom: 15px;">¡Felicidades!</h2>
-        <p style="color: #666; margin-bottom: 20px;">
-          Has alcanzado el <strong>80%</strong> de aciertos.<br>
-          Subes al nivel <strong style="color: #667eea;">${newLevel}</strong>
-        </p>
-        <button 
-          onclick="document.getElementById('level-up-modal').remove()"
-          style="
-            padding: 12px 30px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            cursor: pointer;
-          "
-        >
-          ¡Continuar!
-        </button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-}
-
-// ============================================
-// MODAL DE EXPLICACIÓN TEÓRICA
-// ============================================
-
-async function showExplanationModal() {
-  // Mostrar modal de carga
-  const modal = document.createElement("div");
-  modal.id = "explanation-modal";
-  modal.innerHTML = `
-    <div style="
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0,0,0,0.7);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      padding: 20px;
-    ">
-      <div style="
-        background: white;
-        padding: 30px;
-        border-radius: 16px;
-        max-width: 700px;
-        width: 100%;
-        max-height: 80vh;
-        overflow-y: auto;
-      ">
-        <h2 style="color: #333; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
-          📚 Resumen de tu progreso
-        </h2>
-        
-        <div id="explanation-content" style="color: #333;">
-          <div style="text-align: center; padding: 40px;">
-            <div class="spinner" style="
-              border: 4px solid #f3f3f3;
-              border-top: 4px solid #667eea;
-              border-radius: 50%;
-              width: 40px;
-              height: 40px;
-              animation: spin 1s linear infinite;
-              margin: 0 auto 20px;
-            "></div>
-            <p>Generando explicación personalizada...</p>
-          </div>
-        </div>
-        
-        <div id="close-button-container" style="display: none; text-align: center; margin-top: 20px;">
-          <button 
-            onclick="document.getElementById('explanation-modal').remove()"
-            style="
-              padding: 12px 30px;
-              background: #667eea;
-              color: white;
-              border: none;
-              border-radius: 8px;
-              font-size: 16px;
-              cursor: pointer;
-            "
-          >
-            Continuar
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
   
-  // Obtener explicación del LLM
-  try {
-    const stats = levelStats[currentLevel];
-    const percentage = stats.total > 0 ? ((stats.correct / stats.total) * 100).toFixed(1) : 0;
-    
-    let explanationHtml = `
-      <div style="
-        background: #f8f9fa;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-      ">
-        <h3 style="margin-bottom: 10px;">📊 Estadísticas del nivel ${currentLevel}</h3>
+  // Obtener explicación del LLM solo si hay preguntas fallidas
+  let explanationHtml = "";
+  
+  if (currentBlockFailed.length > 0) {
+    explanationHtml = `
+      <div class="explanation-section">
+        <h3>📖 Explicación teórica</h3>
+        <div class="explanation-loading">
+          <div class="spinner"></div>
+          <p>Generando explicación personalizada...</p>
+        </div>
+      </div>
+    `;
+  } else {
+    explanationHtml = `
+      <div class="explanation-section success">
+        <h3>📖 ¡Excelente trabajo!</h3>
+        <p>No has fallado ninguna pregunta en este bloque. ¡Sigue así!</p>
+      </div>
+    `;
+  }
+  
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>📊 Resumen de tu progreso</h2>
+      
+      ${levelChangeMessage}
+      
+      <div class="summary-stats">
+        <h3>📈 Estadísticas del nivel ${currentLevel}</h3>
         <p>Preguntas respondidas: <strong>${stats.total}</strong></p>
         <p>Correctas: <strong style="color: #28a745;">${stats.correct}</strong></p>
         <p>Incorrectas: <strong style="color: #dc3545;">${stats.total - stats.correct}</strong></p>
         <p>Porcentaje de acierto: <strong>${percentage}%</strong></p>
-        ${percentage >= 80 ? '<p style="color: #28a745; font-weight: bold;">✅ ¡Listo para subir de nivel!</p>' : '<p style="color: #666;">Necesitas 80% para subir de nivel</p>'}
-      </div>
-    `;
-    
-    if (failedQuestionsSession.length > 0) {
-      // Llamar al LLM para explicación
-      const response = await fetch(`${WORKER_URL}/api/llm/explain`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          failedQuestions: failedQuestionsSession.slice(-10) // Últimas 10 fallidas
-        })
-      });
-      
-      const data = await response.json();
-      
-      explanationHtml += `
-        <div style="
-          background: #fff3cd;
-          border: 1px solid #ffc107;
-          padding: 20px;
-          border-radius: 8px;
-        ">
-          <h3 style="margin-bottom: 15px; color: #856404;">📖 Explicación teórica</h3>
-          <div style="white-space: pre-wrap; line-height: 1.6; color: #333;">
-            ${formatExplanation(data.explanation)}
-          </div>
-        </div>
-      `;
-    } else {
-      explanationHtml += `
-        <div style="
-          background: #d4edda;
-          border: 1px solid #28a745;
-          padding: 20px;
-          border-radius: 8px;
-          text-align: center;
-        ">
-          <h3 style="color: #155724;">🎉 ¡Excelente trabajo!</h3>
-          <p style="color: #155724;">No has fallado ninguna pregunta en las últimas 5. ¡Sigue así!</p>
-        </div>
-      `;
-    }
-    
-    document.getElementById("explanation-content").innerHTML = explanationHtml;
-    document.getElementById("close-button-container").style.display = "block";
-    
-  } catch (error) {
-    console.error("Error obteniendo explicación:", error);
-    document.getElementById("explanation-content").innerHTML = `
-      <div style="color: red; padding: 20px;">
-        Error al generar la explicación. Por favor, continúa con las preguntas.
-      </div>
-    `;
-    document.getElementById("close-button-container").style.display = "block";
-  }
-}
-
-function formatExplanation(text) {
-  // Convertir markdown básico a HTML
-  return text
-    .replace(/## (.*)/g, '<h3 style="margin-top: 15px; margin-bottom: 10px;">$1</h3>')
-    .replace(/### (.*)/g, '<h4 style="margin-top: 12px; margin-bottom: 8px;">$1</h4>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/- (.*)/g, '<li style="margin-left: 20px;">$1</li>')
-    .replace(/\n/g, '<br>');
-}
-
-// ============================================
-// ACTUALIZAR DISPLAY DE PROGRESO
-// ============================================
-
-function updateProgressDisplay() {
-  const stats = levelStats[currentLevel];
-  const percentage = stats.total > 0 ? ((stats.correct / stats.total) * 100).toFixed(0) : 0;
-  
-  const progressHtml = `
-    <div style="
-      background: #f8f9fa;
-      padding: 15px 20px;
-      border-radius: 8px;
-      margin-bottom: 20px;
-    ">
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <div>
-          <strong>Nivel ${currentLevel}:</strong> 
-          ${stats.total} preguntas | 
-          <span style="color: #28a745;">✓ ${stats.correct}</span> | 
-          <span style="color: #dc3545;">✗ ${stats.total - stats.correct}</span> | 
-          <strong>${percentage}%</strong>
-        </div>
-        <div style="
-          background: ${percentage >= 80 ? '#28a745' : '#667eea'};
-          color: white;
-          padding: 5px 15px;
-          border-radius: 20px;
-          font-size: 12px;
-        ">
-          ${percentage >= 80 ? '✓ Listo para subir' : `Faltan ${Math.max(0, 80 - percentage)}% para subir`}
-        </div>
+        <p class="hint">Necesitas 80% para subir de nivel</p>
       </div>
       
-      <div style="
-        margin-top: 10px;
-        background: #e0e0e0;
-        border-radius: 10px;
-        height: 10px;
-        overflow: hidden;
-      ">
-        <div style="
-          width: ${Math.min(percentage, 100)}%;
-          height: 100%;
-          background: ${percentage >= 80 ? '#28a745' : '#667eea'};
-          transition: width 0.3s ease;
-        "></div>
-      </div>
+      ${explanationHtml}
+      
+      <button class="btn-continue" onclick="closeSummaryAndContinue('${newLevel}')">Continuar</button>
     </div>
   `;
   
-  document.getElementById("progress-display").innerHTML = progressHtml;
+  document.body.appendChild(modal);
+  
+  // Si hay preguntas fallidas, obtener explicación del LLM
+  if (currentBlockFailed.length > 0) {
+    try {
+      console.log("Solicitando explicación para preguntas:", currentBlockFailed);
+      
+      const response = await fetch(`${WORKER_URL}/api/llm/explain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ failedQuestions: currentBlockFailed })
+      });
+      
+      const data = await response.json();
+      console.log("Explicación recibida");
+      
+      const explanationSection = modal.querySelector(".explanation-section");
+      if (explanationSection && data.explanation) {
+        // Convertir markdown básico a HTML
+        let formattedExplanation = data.explanation
+          .replace(/## (.*?)(\n|$)/g, '<h2>$1</h2>')
+          .replace(/### (.*?)(\n|$)/g, '<h3>$1</h3>')
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*(.*?)\*/g, '<em>$1</em>')
+          .replace(/- (.*?)(\n|$)/g, '<li>$1</li>')
+          .replace(/\n\n/g, '</p><p>')
+          .replace(/\n/g, '<br>');
+        
+        explanationSection.innerHTML = `
+          <h3>📖 Explicación teórica</h3>
+          <div class="explanation-content">${formattedExplanation}</div>
+        `;
+      }
+    } catch (error) {
+      console.error("Error obteniendo explicación:", error);
+      const explanationSection = modal.querySelector(".explanation-section");
+      if (explanationSection) {
+        explanationSection.innerHTML = `
+          <h3>📖 Explicación teórica</h3>
+          <p>No se pudo generar la explicación. Por favor, revisa los conceptos de las preguntas fallidas.</p>
+        `;
+      }
+    }
+  }
 }
+
+// ============================================
+// CERRAR RESUMEN Y CONTINUAR
+// ============================================
+
+function closeSummaryAndContinue(newLevel) {
+  // Cerrar modal
+  const modal = document.getElementById("summary-modal");
+  if (modal) {
+    modal.remove();
+  }
+  
+  // Cambiar de nivel si es necesario
+  if (newLevel !== currentLevel) {
+    currentLevel = newLevel;
+    // Resetear estadísticas del nuevo nivel
+    levelStats[newLevel] = { total: 0, correct: 0 };
+    answeredQuestionIds = []; // Resetear preguntas respondidas para el nuevo nivel
+  }
+  
+  // Resetear bloque actual
+  currentBlockFailed = [];
+  questionsInCurrentBlock = 0;
+  
+  // Cargar siguiente pregunta
+  loadQuestion();
+}
+
+// ============================================
+// ESTILOS ADICIONALES
+// ============================================
+
+const additionalStyles = `
+<style>
+  .question-card {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 25px;
+  }
+  
+  .question-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  
+  .level-badge {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  
+  .level-básico { background: #28a745; color: white; }
+  .level-medio { background: #ffc107; color: black; }
+  .level-avanzado { background: #dc3545; color: white; }
+  
+  .question-id {
+    color: #666;
+    font-size: 14px;
+  }
+  
+  .question-text {
+    font-size: 20px;
+    color: #333;
+    margin-bottom: 25px;
+    line-height: 1.5;
+  }
+  
+  .options-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .option-btn {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px 20px;
+    background: white;
+    border: 2px solid #e0e0e0;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: left;
+  }
+  
+  .option-btn:hover:not(:disabled) {
+    border-color: #667eea;
+    background: #f0f4ff;
+  }
+  
+  .option-btn:disabled {
+    cursor: default;
+  }
+  
+  .option-btn.correct {
+    border-color: #28a745;
+    background: #d4edda;
+  }
+  
+  .option-btn.wrong {
+    border-color: #dc3545;
+    background: #f8d7da;
+  }
+  
+  .option-letter {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #667eea;
+    color: white;
+    border-radius: 50%;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  
+  .option-text {
+    flex: 1;
+    font-size: 16px;
+    color: #333;
+  }
+  
+  .feedback {
+    display: flex;
+    gap: 15px;
+    padding: 20px;
+    border-radius: 10px;
+    margin-top: 20px;
+  }
+  
+  .feedback-correct {
+    background: #d4edda;
+    border: 1px solid #28a745;
+  }
+  
+  .feedback-wrong {
+    background: #f8d7da;
+    border: 1px solid #dc3545;
+  }
+  
+  .feedback-icon {
+    font-size: 24px;
+  }
+  
+  .feedback-text strong {
+    display: block;
+    margin-bottom: 5px;
+  }
+  
+  .feedback-text p {
+    margin: 0;
+    color: #333;
+    line-height: 1.5;
+  }
+  
+  .btn-next {
+    padding: 12px 30px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+  
+  .btn-next:hover {
+    transform: translateY(-2px);
+  }
+  
+  /* Progress card */
+  .progress-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  }
+  
+  .progress-header {
+    margin-bottom: 15px;
+  }
+  
+  .progress-title {
+    font-weight: 600;
+    color: #333;
+  }
+  
+  .progress-stats {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 15px;
+  }
+  
+  .stat {
+    text-align: center;
+  }
+  
+  .stat-value {
+    display: block;
+    font-size: 24px;
+    font-weight: 700;
+    color: #333;
+  }
+  
+  .stat.correct .stat-value { color: #28a745; }
+  .stat.wrong .stat-value { color: #dc3545; }
+  .stat.percentage .stat-value { color: #667eea; }
+  
+  .stat-label {
+    font-size: 12px;
+    color: #666;
+  }
+  
+  .progress-bar-container {
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    transition: width 0.3s;
+  }
+  
+  .progress-hint {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+  }
+  
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+  }
+  
+  .modal-content {
+    background: white;
+    border-radius: 16px;
+    padding: 30px;
+    max-width: 700px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  
+  .modal-content h2 {
+    margin-bottom: 20px;
+    color: #333;
+  }
+  
+  .level-up-message {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 20px;
+  }
+  
+  .summary-stats {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+  }
+  
+  .summary-stats h3 {
+    margin-bottom: 15px;
+    color: #333;
+  }
+  
+  .summary-stats p {
+    margin: 8px 0;
+    color: #555;
+  }
+  
+  .summary-stats .hint {
+    font-size: 12px;
+    color: #888;
+    margin-top: 15px;
+  }
+  
+  .explanation-section {
+    background: #fff9e6;
+    border: 1px solid #ffc107;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+  }
+  
+  .explanation-section.success {
+    background: #d4edda;
+    border-color: #28a745;
+  }
+  
+  .explanation-section h3 {
+    margin-bottom: 15px;
+    color: #333;
+  }
+  
+  .explanation-content {
+    color: #333;
+    line-height: 1.7;
+  }
+  
+  .explanation-content h2 {
+    font-size: 18px;
+    margin: 20px 0 10px;
+    color: #333;
+  }
+  
+  .explanation-content h3 {
+    font-size: 16px;
+    margin: 15px 0 10px;
+    color: #444;
+  }
+  
+  .explanation-content li {
+    margin-left: 20px;
+    margin-bottom: 5px;
+  }
+  
+  .explanation-loading {
+    text-align: center;
+    padding: 20px;
+  }
+  
+  .btn-continue {
+    width: 100%;
+    padding: 15px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+  
+  .btn-continue:hover {
+    transform: translateY(-2px);
+  }
+  
+  .spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 15px;
+  }
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  .loading {
+    text-align: center;
+    padding: 60px 20px;
+    color: #666;
+  }
+</style>
+`;
+
+// Insertar estilos al cargar
+document.addEventListener("DOMContentLoaded", () => {
+  document.head.insertAdjacentHTML("beforeend", additionalStyles);
+});
 
 // ============================================
 // INICIALIZAR
@@ -742,20 +874,13 @@ window.addEventListener("DOMContentLoaded", () => {
   const saved = localStorage.getItem("tutor_user");
   if (saved) {
     currentUser = JSON.parse(saved);
-    showQuizScreen();
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("quiz-screen").style.display = "block";
+    document.getElementById("current-user").textContent = currentUser.username;
+    
+    // Cargar nivel y progreso
+    loadUserLevel().then(() => {
+      loadQuestion();
+    });
   }
 });
-
-// CSS para animación del spinner
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-  @keyframes scaleIn {
-    0% { transform: scale(0.8); opacity: 0; }
-    100% { transform: scale(1); opacity: 1; }
-  }
-`;
-document.head.appendChild(style);
