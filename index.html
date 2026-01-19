@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tutor PRL - Con Login</title>
+  <title>Tutor PRL Adaptativo</title>
   <style>
     * {
       margin: 0;
@@ -23,17 +23,20 @@
 
     .container {
       width: 100%;
-      max-width: 700px;
+      max-width: 750px;
       background: white;
-      border-radius: 12px;
+      border-radius: 16px;
       box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
       padding: 40px;
     }
 
     h1 {
       color: #333;
-      margin-bottom: 10px;
+      margin-bottom: 5px;
       font-size: 28px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
     .subtitle {
@@ -42,123 +45,94 @@
       font-size: 14px;
     }
 
-    /* LOGIN SCREEN */
-    #login-screen {
-      display: block;
-    }
-
-    #quiz-screen {
-      display: none;
-    }
-
+    /* Login styles */
     .form-group {
-      margin-bottom: 15px;
+      margin-bottom: 20px;
     }
 
-    label {
+    .form-group label {
       display: block;
-      margin-bottom: 5px;
+      margin-bottom: 8px;
       color: #333;
       font-weight: 500;
-      font-size: 14px;
     }
 
-    input, select {
+    .form-group input {
       width: 100%;
-      padding: 12px;
-      border: 2px solid #ddd;
-      border-radius: 5px;
-      font-size: 14px;
-      font-family: inherit;
+      padding: 12px 15px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.2s;
     }
 
-    input:focus, select:focus {
+    .form-group input:focus {
       outline: none;
       border-color: #667eea;
-      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-
-    .button-group {
-      display: flex;
-      gap: 10px;
-      margin-top: 20px;
-    }
-
-    button {
-      flex: 1;
-      padding: 12px;
-      border: none;
-      border-radius: 5px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
     }
 
     .btn-primary {
-      background: #667eea;
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
     }
 
     .btn-primary:hover {
-      background: #5568d3;
       transform: translateY(-2px);
-      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
-    }
-
-    .btn-secondary {
-      background: #ddd;
-      color: #333;
-    }
-
-    .btn-secondary:hover {
-      background: #ccc;
-    }
-
-    .btn-danger {
-      background: #dc3545;
-      color: white;
-    }
-
-    .btn-danger:hover {
-      background: #c82333;
-    }
-
-    .error {
-      color: #dc3545;
-      font-size: 13px;
-      margin-top: 5px;
-    }
-
-    .success {
-      color: #28a745;
-      font-size: 13px;
-      margin-top: 5px;
+      box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
     }
 
     .toggle-form {
       text-align: center;
-      margin-top: 15px;
-      font-size: 13px;
+      margin-top: 20px;
       color: #666;
     }
 
     .toggle-form a {
       color: #667eea;
-      cursor: pointer;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .toggle-form a:hover {
       text-decoration: underline;
     }
 
-    /* QUIZ SCREEN */
+    /* Quiz styles */
+    .user-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .user-bar a {
+      color: #667eea;
+      text-decoration: none;
+    }
+
+    .user-bar a:hover {
+      text-decoration: underline;
+    }
+
     #question-container {
       min-height: 300px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
     }
 
     .loading {
       text-align: center;
+      padding: 60px 20px;
       color: #666;
     }
 
@@ -169,7 +143,7 @@
       width: 40px;
       height: 40px;
       animation: spin 1s linear infinite;
-      margin: 20px auto;
+      margin: 0 auto 20px;
     }
 
     @keyframes spin {
@@ -177,89 +151,61 @@
       100% { transform: rotate(360deg); }
     }
 
-    .user-info {
-      background: #f0f0f0;
-      padding: 10px;
-      border-radius: 5px;
-      margin-bottom: 15px;
-      font-size: 13px;
-      color: #666;
+    /* Hidden by default */
+    #quiz-screen {
+      display: none;
     }
   </style>
 </head>
 <body>
   <div class="container">
+    <h1>📚 Tutor PRL Adaptativo</h1>
+    <p class="subtitle">Prevención de Riesgos Laborales - Sistema Inteligente de Aprendizaje</p>
+
     <!-- LOGIN SCREEN -->
     <div id="login-screen">
-      <h1>📚 Tutor PRL</h1>
-      <p class="subtitle">Prevención de Riesgos Laborales</p>
-
-      <!-- LOGIN FORM -->
+      <!-- Login Form -->
       <div id="login-form">
-        <h2 style="font-size: 20px; margin-bottom: 20px; color: #333;">Inicia sesión</h2>
-        
         <div class="form-group">
-          <label>Usuario</label>
+          <label for="login-username">Usuario</label>
           <input type="text" id="login-username" placeholder="Tu usuario">
         </div>
-
         <div class="form-group">
-          <label>Contraseña</label>
+          <label for="login-password">Contraseña</label>
           <input type="password" id="login-password" placeholder="Tu contraseña">
         </div>
-
-        <div id="login-error" class="error"></div>
-
-        <div class="button-group">
-          <button class="btn-primary" onclick="handleLogin()">Iniciar sesión</button>
-        </div>
-
-        <div class="toggle-form">
-          ¿No tienes cuenta? <a onclick="toggleForms()">Regístrate aquí</a>
-        </div>
+        <button class="btn-primary" onclick="handleLogin()">Iniciar sesión</button>
+        <p class="toggle-form">
+          ¿No tienes cuenta? <a href="#" onclick="toggleForms(); return false;">Regístrate aquí</a>
+        </p>
       </div>
 
-      <!-- REGISTER FORM (HIDDEN) -->
+      <!-- Register Form -->
       <div id="register-form" style="display: none;">
-        <h2 style="font-size: 20px; margin-bottom: 20px; color: #333;">Crear cuenta</h2>
-        
         <div class="form-group">
-          <label>Usuario</label>
+          <label for="register-username">Usuario</label>
           <input type="text" id="register-username" placeholder="Elige un usuario">
         </div>
-
         <div class="form-group">
-          <label>Contraseña</label>
+          <label for="register-password">Contraseña</label>
           <input type="password" id="register-password" placeholder="Elige una contraseña">
         </div>
-
-        <div class="form-group">
-          <label>Rol (opcional)</label>
-          <select id="register-role">
-            <option value="">Sin especificar</option>
-            <option value="comercial">Comercial</option>
-            <option value="it">IT</option>
-            <option value="back-office">Back-office</option>
-            <option value="operario">Operario</option>
-            <option value="otro">Otro</option>
-          </select>
-        </div>
-
-        <div id="register-error" class="error"></div>
-        <div id="register-success" class="success"></div>
-
-        <div class="button-group">
-          <button class="btn-primary" onclick="handleRegister()">Crear cuenta</button>
-          <button class="btn-secondary" onclick="toggleForms()">Volver</button>
-        </div>
+        <button class="btn-primary" onclick="handleRegister()">Crear cuenta</button>
+        <p class="toggle-form">
+          ¿Ya tienes cuenta? <a href="#" onclick="toggleForms(); return false;">Inicia sesión</a>
+        </p>
       </div>
     </div>
 
     <!-- QUIZ SCREEN -->
     <div id="quiz-screen">
-      <div class="user-info">
-        Conectado como: <strong id="current-user"></strong> | 
-        <a onclick="handleLogout()" style="color: #667eea; cursor: pointer; text-decoration: underline;">Cerrar sesión</a>
+      <div class="user-bar">
+        <span>Conectado como: <strong id="current-user"></strong></span>
+        <a href="#" onclick="logout(); return false;">Cerrar sesión</a>
+      </div>
+
+      <div id="progress-display">
+        <!-- Progress stats will be inserted here -->
       </div>
 
       <div id="question-container">
@@ -274,4 +220,3 @@
   <script src="script.js"></script>
 </body>
 </html>
-
