@@ -35,7 +35,6 @@ function addMessage(text, sender = "bot", metadata = {}) {
   
   div.innerHTML = formattedText;
   
-  // Añadir opciones si existen
   if (metadata.options && Object.keys(metadata.options).length > 0) {
     const optionsDiv = document.createElement("div");
     optionsDiv.classList.add("options-container");
@@ -53,18 +52,12 @@ function addMessage(text, sender = "bot", metadata = {}) {
     });
     
     div.appendChild(optionsDiv);
-    currentOptions = metadata.options;
   }
   
-  // Añadir progreso si existe
   if (metadata.progress) {
     const progressDiv = document.createElement("div");
     progressDiv.classList.add("progress-indicator");
-    progressDiv.innerHTML = `
-      <strong>📊 Progreso:</strong> 
-      ${metadata.progress.correctAnswers}/${metadata.progress.questionsAsked} correctas | 
-      Nivel: <span class="level-badge ${metadata.progress.currentLevel}">${metadata.progress.currentLevel}</span>
-    `;
+    progressDiv.innerHTML = `<strong>📊 Progreso:</strong> ${metadata.progress.correctAnswers}/${metadata.progress.questionsAsked} correctas | Nivel: <span class="level-badge ${metadata.progress.currentLevel}">${metadata.progress.currentLevel}</span>`;
     div.appendChild(progressDiv);
   }
   
@@ -142,7 +135,6 @@ function saveProgress() {
 function loadProgress() {
   const saved = localStorage.getItem('tutorPRL_progress');
   if (!saved) return;
-  
   try {
     const progress = JSON.parse(saved);
     userState.questionsAsked = progress.questionsAsked || 0;
@@ -156,23 +148,23 @@ function loadProgress() {
   }
 }
 
-// ===== INICIALIZACIÓN =====
+function clearProgress() {
+  localStorage.removeItem('tutorPRL_progress');
+  location.reload();
+}
 
 loadProgress();
 
 if (messages.length === 0 && !userState.role) {
-  addMessage("Hola, soy tu tutor adaptativo de PRL. Vamos a trabajar con preguntas tipo test que se adaptarán a tu nivel de conocimiento.\n\n¿Cuál es tu rol en la empresa? (comercial, back-office, IT, etc.)", "bot");
+  addMessage("Hola, soy tu tutor adaptativo de PRL. Vamos a trabajar con preguntas tipo test que se adaptarán a tu nivel de conocimiento.\\n\\n¿Cuál es tu rol en la empresa? (comercial, back-office, IT, etc.)", "bot");
   userState.phase = 'role';
 }
-
-// ===== EVENT LISTENERS =====
 
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   let text = userInput.value.trim();
   if (!text) return;
 
-  // FASE 1: OBTENER ROL
   if (userState.phase === 'role') {
     addMessage(text, "user");
     userInput.value = "";
@@ -193,7 +185,6 @@ chatForm.addEventListener("submit", async (e) => {
         addMessage(result.content, "bot");
         messages.push({ role: "assistant", content: result.content, metadata: {} });
         
-        // GENERAR PRIMERA PREGUNTA
         setTimeout(async () => {
           try {
             const firstQuestion = await callWorker("Genera la primera pregunta de nivel BÁSICO sobre PRL con 4 opciones (A, B, C, D)");
@@ -234,7 +225,6 @@ chatForm.addEventListener("submit", async (e) => {
     return;
   }
 
-  // FASE 2: RESPONDER PREGUNTAS
   if (userState.phase === 'question') {
     text = text.toUpperCase();
     if (!/^[A-D]$/.test(text)) {
@@ -269,7 +259,7 @@ chatForm.addEventListener("submit", async (e) => {
           addMessage(`✅ ¡Correcto! ${result.feedback}`, "bot");
         } else {
           userState.incorrectAnswers++;
-          addMessage(`❌ Incorrecto. ${result.feedback}\n\n**Respuesta correcta:** ${result.correctAnswer}\n\n**Justificación:** ${result.justification}`, "bot");
+          addMessage(`❌ Incorrecto. ${result.feedback}\\n\\n**Respuesta correcta:** ${result.correctAnswer}\\n\\n**Justificación:** ${result.justification}`, "bot");
         }
         
         const levelChanged = updateProgress();
