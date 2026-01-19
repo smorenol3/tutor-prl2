@@ -1,14 +1,14 @@
-// ===== CONFIGURACIÓN =====
+// Configuración
 const WORKER_URL = "https://tutor-prl2.s-morenoleiva91.workers.dev";
 const REQUEST_DELAY_MS = 1000;
 
-// ===== VARIABLES GLOBALES =====
-const chatContainer = document.getElementById("chat-container" );
+// Elementos del DOM
+const chatContainer = document.getElementById("chat-container");
 const chatForm = document.getElementById("chat-form");
 const userInput = document.getElementById("user-input");
 
+// Estado global
 const messages = [];
-
 let userState = {
   questionsAsked: 0,
   correctAnswers: 0,
@@ -21,20 +21,20 @@ let userState = {
 let currentQuestion = null;
 let isRequestInProgress = false;
 
-// ===== FUNCIONES AUXILIARES =====
-
+// Agregar mensaje al chat
 function addMessage(text, sender = "bot", metadata = {}) {
   const div = document.createElement("div");
   div.classList.add("message", sender);
   
+  // Formatear texto
   const formattedText = text
-    .replace(/\n/g, '  
-')
+    .replace(/\n/g, '<br>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>');
   
   div.innerHTML = formattedText;
   
+  // Agregar opciones si existen
   if (metadata.options && Object.keys(metadata.options).length > 0) {
     const optionsDiv = document.createElement("div");
     optionsDiv.classList.add("options-container");
@@ -43,7 +43,7 @@ function addMessage(text, sender = "bot", metadata = {}) {
       const button = document.createElement("button");
       button.classList.add("option-button");
       button.type = "button";
-      button.textContent = `${key}. ${value}`;
+      button.textContent = key + ". " + value;
       button.onclick = (e) => {
         e.preventDefault();
         selectOption(key);
@@ -54,10 +54,14 @@ function addMessage(text, sender = "bot", metadata = {}) {
     div.appendChild(optionsDiv);
   }
   
+  // Agregar indicador de progreso si existe
   if (metadata.progress) {
     const progressDiv = document.createElement("div");
     progressDiv.classList.add("progress-indicator");
-    progressDiv.innerHTML = `<strong>📊 Progreso:</strong> ${metadata.progress.correctAnswers}/${metadata.progress.questionsAsked} correctas | Nivel: <span class="level-badge ${metadata.progress.currentLevel}">${metadata.progress.currentLevel}</span>`;
+    progressDiv.innerHTML = 
+      "Progreso: " + metadata.progress.correctAnswers + "/" + 
+      metadata.progress.questionsAsked + " correctas | Nivel: " + 
+      metadata.progress.currentLevel;
     div.appendChild(progressDiv);
   }
   
@@ -65,6 +69,7 @@ function addMessage(text, sender = "bot", metadata = {}) {
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
+// Seleccionar opción
 function selectOption(option) {
   if (isRequestInProgress) return;
   userInput.value = option.toUpperCase();
@@ -72,6 +77,7 @@ function selectOption(option) {
   chatForm.dispatchEvent(event);
 }
 
+// Llamar al Worker
 async function callWorker(message, includeCurrentQuestion = false) {
   try {
     const payload = { message, userState };
@@ -87,7 +93,7 @@ async function callWorker(message, includeCurrentQuestion = false) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Error ${response.status}: ${errorText}`);
+      throw new Error("Error " + response.status + ": " + errorText);
     }
 
     return await response.json();
@@ -97,6 +103,7 @@ async function callWorker(message, includeCurrentQuestion = false) {
   }
 }
 
+// Actualizar progreso y nivel
 function updateProgress() {
   const total = userState.correctAnswers + userState.incorrectAnswers;
   if (total === 0) return false;
@@ -117,6 +124,7 @@ function updateProgress() {
   return oldLevel !== userState.currentLevel;
 }
 
+// Guardar progreso
 function saveProgress() {
   try {
     localStorage.setItem('tutorPRL_progress', JSON.stringify({
@@ -132,9 +140,11 @@ function saveProgress() {
   }
 }
 
+// Cargar progreso
 function loadProgress() {
   const saved = localStorage.getItem('tutorPRL_progress');
   if (!saved) return;
+  
   try {
     const progress = JSON.parse(saved);
     userState.questionsAsked = progress.questionsAsked || 0;
@@ -148,23 +158,27 @@ function loadProgress() {
   }
 }
 
+// Limpiar progreso
 function clearProgress() {
   localStorage.removeItem('tutorPRL_progress');
   location.reload();
 }
 
+// Inicialización
 loadProgress();
 
 if (messages.length === 0 && !userState.role) {
-  addMessage("Hola, soy tu tutor adaptativo de PRL. Vamos a trabajar con preguntas tipo test que se adaptarán a tu nivel de conocimiento.\\n\\n¿Cuál es tu rol en la empresa? (comercial, back-office, IT, etc.)", "bot");
+  addMessage("Hola, soy tu tutor adaptativo de PRL. Vamos a trabajar con preguntas tipo test que se adaptarán a tu nivel de conocimiento.\n\nCuál es tu rol en la empresa? (comercial, back-office, IT, etc.)", "bot");
   userState.phase = 'role';
 }
 
+// Event listener del formulario
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   let text = userInput.value.trim();
   if (!text) return;
 
+  // FASE 1: Obtener rol
   if (userState.phase === 'role') {
     addMessage(text, "user");
     userInput.value = "";
@@ -185,6 +199,7 @@ chatForm.addEventListener("submit", async (e) => {
         addMessage(result.content, "bot");
         messages.push({ role: "assistant", content: result.content, metadata: {} });
         
+        // Generar primera pregunta
         setTimeout(async () => {
           try {
             const firstQuestion = await callWorker("Genera la primera pregunta de nivel BÁSICO sobre PRL con 4 opciones (A, B, C, D)");
@@ -225,6 +240,7 @@ chatForm.addEventListener("submit", async (e) => {
     return;
   }
 
+  // FASE 2: Responder preguntas
   if (userState.phase === 'question') {
     text = text.toUpperCase();
     if (!/^[A-D]$/.test(text)) {
@@ -256,19 +272,19 @@ chatForm.addEventListener("submit", async (e) => {
         
         if (result.isCorrect) {
           userState.correctAnswers++;
-          addMessage(`✅ ¡Correcto! ${result.feedback}`, "bot");
+          addMessage("Correcto! " + result.feedback, "bot");
         } else {
           userState.incorrectAnswers++;
-          addMessage(`❌ Incorrecto. ${result.feedback}\\n\\n**Respuesta correcta:** ${result.correctAnswer}\\n\\n**Justificación:** ${result.justification}`, "bot");
+          addMessage("Incorrecto. " + result.feedback + "\n\nRespuesta correcta: " + result.correctAnswer + "\n\nJustificación: " + result.justification, "bot");
         }
         
         const levelChanged = updateProgress();
         
         if (levelChanged || userState.questionsAsked % 5 === 0) {
           const levelMessages = {
-            'BÁSICO': "ℹ️ Vamos a volver a nivel BÁSICO para reforzar fundamentos.",
-            'MEDIO': "🎉 ¡Felicidades! Has subido a nivel MEDIO. Las preguntas serán más desafiantes.",
-            'AVANZADO': "🏆 ¡Excelente! Has alcanzado nivel AVANZADO. Prepárate para preguntas complejas."
+            'BÁSICO': "Vamos a volver a nivel BÁSICO para reforzar fundamentos.",
+            'MEDIO': "Felicidades! Has subido a nivel MEDIO. Las preguntas serán más desafiantes.",
+            'AVANZADO': "Excelente! Has alcanzado nivel AVANZADO. Prepárate para preguntas complejas."
           };
           
           if (levelChanged) {
@@ -283,7 +299,7 @@ chatForm.addEventListener("submit", async (e) => {
                 
                 setTimeout(async () => {
                   try {
-                    const nextQ = await callWorker(`Genera una nueva pregunta de nivel ${userState.currentLevel} sobre PRL con 4 opciones (A, B, C, D)`);
+                    const nextQ = await callWorker("Genera una nueva pregunta de nivel " + userState.currentLevel + " sobre PRL con 4 opciones (A, B, C, D)");
                     if (nextQ.type === 'evaluation') {
                       currentQuestion = {
                         text: nextQ.nextQuestion,
@@ -342,4 +358,5 @@ chatForm.addEventListener("submit", async (e) => {
   }
 });
 
+// Guardar progreso cada 15 segundos
 setInterval(saveProgress, 15000);
