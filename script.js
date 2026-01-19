@@ -1,9 +1,8 @@
 // ============================================
-// FRONTEND CON D1 - FASE 2 MEJORADA
-// Login + Progreso + Feedback discreto (sin popup)
+// FRONTEND ADAPTATIVO - TUTOR INTELIGENTE
+// Nivel automático + Explicaciones cada 5 preguntas
 // ============================================
 
-// CONFIGURACIÓN
 const WORKER_URL = "https://tutor-prl2.s-morenoleiva91.workers.dev";
 let currentQuestion = null;
 let currentLevel = "BÁSICO";
@@ -12,7 +11,8 @@ let correctAnswers = 0;
 let wrongAnswers = 0;
 let answered = false;
 let currentUser = null;
-let failedQuestions = []; // Rastrear preguntas fallidas
+let failedQuestions = [];
+let questionsInSession = 0; // Contador para cada 5 preguntas
 
 // ============================================
 // AUTENTICACIÓN
@@ -86,17 +86,15 @@ async function handleLogin() {
       return;
     }
 
-    // Login exitoso
     currentUser = data.user;
     localStorage.setItem("tutor_user", JSON.stringify(currentUser));
     
-    // Mostrar pantalla de quiz
     document.getElementById("login-screen").style.display = "none";
     document.getElementById("quiz-screen").style.display = "block";
     document.getElementById("current-user").textContent = currentUser.username;
     
-    // Cargar progreso previo
-    loadUserProgress();
+    await loadUserProgress();
+    await determineLevel();
     loadQuestion();
   } catch (error) {
     document.getElementById("login-error").textContent = "Error: " + error.message;
@@ -125,7 +123,6 @@ async function loadUserProgress() {
     const data = await response.json();
 
     if (data.success && data.stats) {
-      // Calcular estadísticas
       questionsAnswered = 0;
       correctAnswers = 0;
 
@@ -135,11 +132,54 @@ async function loadUserProgress() {
       });
 
       wrongAnswers = questionsAnswered - correctAnswers;
-
       console.log("Progreso cargado:", { questionsAnswered, correctAnswers, wrongAnswers });
     }
   } catch (error) {
     console.error("Error cargando progreso:", error);
+  }
+}
+
+// ============================================
+// DETERMINAR NIVEL AUTOMÁTICAMENTE
+// ============================================
+
+async function determineLevel() {
+  try {
+    const response = await fetch(`${WORKER_URL}/api/progress/${currentUser.id}`);
+    const data = await response.json();
+
+    if (!data.success || !data.stats || data.stats.length === 0) {
+      // Sin datos: comenzar en BÁSICO
+      currentLevel = "BÁSICO";
+      console.log("Sin datos previos. Comenzando en BÁSICO");
+      return;
+    }
+
+    // Buscar el nivel más alto donde tiene ≥80% de aciertos
+    let newLevel = "BÁSICO";
+    
+    // Verificar AVANZADO
+    const avanzado = data.stats.find(s => s.level === "AVANZADO");
+    if (avanzado && avanzado.correct / avanzado.total >= 0.80) {
+      newLevel = "AVANZADO";
+    } 
+    // Verificar MEDIO
+    else {
+      const medio = data.stats.find(s => s.level === "MEDIO");
+      if (medio && medio.correct / medio.total >= 0.80) {
+        newLevel = "MEDIO";
+      }
+      // Si no, quedarse en BÁSICO
+      else {
+        newLevel = "BÁSICO";
+      }
+    }
+
+    currentLevel = newLevel;
+    console.log(`Nivel determinado automáticamente: ${currentLevel}`);
+  } catch (error) {
+    console.error("Error determinando nivel:", error);
+    currentLevel = "BÁSICO";
   }
 }
 
@@ -192,7 +232,7 @@ function displayQuestion() {
       </div>
       
       <div style="margin-bottom: 10px; color: #666; font-size: 14px;">
-        Nivel: <strong>${currentQuestion.level}</strong> | Pregunta ID: ${currentQuestion.id}
+        Nivel: <strong>${currentLevel}</strong> | Pregunta ID: ${currentQuestion.id}
       </div>
       
       <h2 style="margin: 20px 0; font-size: 18px; color: #333;">
@@ -258,54 +298,6 @@ function displayQuestion() {
         >
           ↻ Siguiente pregunta
         </button>
-        
-        <button 
-          onclick="changeLevel('BÁSICO')"
-          style="
-            padding: 10px 20px;
-            margin-left: 10px;
-            background: ${currentLevel === 'BÁSICO' ? '#28a745' : '#ddd'};
-            color: ${currentLevel === 'BÁSICO' ? 'white' : 'black'};
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-          "
-        >
-          BÁSICO
-        </button>
-        
-        <button 
-          onclick="changeLevel('MEDIO')"
-          style="
-            padding: 10px 20px;
-            margin-left: 10px;
-            background: ${currentLevel === 'MEDIO' ? '#28a745' : '#ddd'};
-            color: ${currentLevel === 'MEDIO' ? 'white' : 'black'};
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-          "
-        >
-          MEDIO
-        </button>
-        
-        <button 
-          onclick="changeLevel('AVANZADO')"
-          style="
-            padding: 10px 20px;
-            margin-left: 10px;
-            background: ${currentLevel === 'AVANZADO' ? '#28a745' : '#ddd'};
-            color: ${currentLevel === 'AVANZADO' ? 'white' : 'black'};
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-          "
-        >
-          AVANZADO
-        </button>
       </div>
     </div>
   `;
@@ -339,11 +331,17 @@ async function selectAnswer(letter) {
   
   // Actualizar estadísticas
   questionsAnswered++;
+  questionsInSession++;
+  
   if (isCorrect) {
     correctAnswers++;
   } else {
     wrongAnswers++;
-    failedQuestions.push(currentQuestion.id);
+    failedQuestions.push({
+      id: currentQuestion.id,
+      question: currentQuestion.question,
+      topic: extractTopic(currentQuestion.question)
+    });
   }
 
   // Guardar en BD
@@ -394,16 +392,156 @@ async function selectAnswer(letter) {
     btn.disabled = true;
     btn.style.cursor = "default";
   });
+
+  // Cada 5 preguntas: mostrar explicación teórica
+  if (questionsInSession % 5 === 0) {
+    setTimeout(() => {
+      showTheoreticalExplanation();
+    }, 2000);
+  }
 }
 
 // ============================================
-// CAMBIAR NIVEL
+// EXTRAER TEMA DE LA PREGUNTA
 // ============================================
 
-function changeLevel(level) {
-  currentLevel = level;
-  console.log(`Nivel cambiado a: ${level}`);
-  loadQuestion();
+function extractTopic(question) {
+  // Palabras clave para identificar temas
+  const keywords = {
+    "EPP": "Equipos de Protección Personal",
+    "riesgo": "Evaluación de Riesgos",
+    "accidente": "Prevención de Accidentes",
+    "emergencia": "Planes de Emergencia",
+    "salud": "Vigilancia de la Salud",
+    "ergonomía": "Ergonomía",
+    "ruido": "Contaminación Acústica",
+    "químico": "Riesgos Químicos",
+    "biológico": "Riesgos Biológicos",
+    "capacitación": "Capacitación y Formación",
+    "auditoría": "Auditorías de Seguridad",
+    "incidente": "Gestión de Incidentes"
+  };
+
+  for (const [key, topic] of Object.entries(keywords)) {
+    if (question.toLowerCase().includes(key.toLowerCase())) {
+      return topic;
+    }
+  }
+
+  return "Prevención de Riesgos Laborales";
+}
+
+// ============================================
+// MOSTRAR EXPLICACIÓN TEÓRICA (CADA 5 PREGUNTAS)
+// ============================================
+
+async function showTheoreticalExplanation() {
+  if (failedQuestions.length === 0) {
+    console.log("Sin preguntas fallidas en este ciclo");
+    return;
+  }
+
+  // Mostrar modal con explicación
+  const modal = document.createElement("div");
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  `;
+
+  const content = document.createElement("div");
+  content.style.cssText = `
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  `;
+
+  // Obtener temas fallidos
+  const failedTopics = [...new Set(failedQuestions.map(q => q.topic))];
+  
+  content.innerHTML = `
+    <h2 style="color: #333; margin-bottom: 20px;">📚 Explicación Teórica - Refuerzo</h2>
+    <p style="color: #666; margin-bottom: 15px;">
+      Has completado 5 preguntas. Aquí está la explicación teórica de los temas donde fallaste:
+    </p>
+    
+    <div id="explanation-content" style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin-bottom: 20px; color: #333;">
+      <p>Cargando explicación...</p>
+    </div>
+    
+    <button onclick="this.parentElement.parentElement.remove()" style="
+      width: 100%;
+      padding: 12px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    ">
+      Continuar
+    </button>
+  `;
+
+  modal.appendChild(content);
+  document.body.appendChild(modal);
+
+  // Generar explicación con LLM
+  try {
+    const explanation = await generateLLMExplanation(failedTopics);
+    document.getElementById("explanation-content").innerHTML = explanation;
+  } catch (error) {
+    document.getElementById("explanation-content").innerHTML = `
+      <p style="color: #dc3545;">Error al generar explicación: ${error.message}</p>
+    `;
+  }
+
+  // Limpiar preguntas fallidas después de mostrar
+  failedQuestions = [];
+}
+
+// ============================================
+// GENERAR EXPLICACIÓN CON LLM
+// ============================================
+
+async function generateLLMExplanation(topics) {
+  try {
+    const response = await fetch(`${WORKER_URL}/api/llm/explain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topics: topics,
+        level: currentLevel
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error("Error en LLM");
+    }
+
+    const data = await response.json();
+    return data.explanation || "No se pudo generar la explicación";
+  } catch (error) {
+    console.error("Error con LLM:", error);
+    return `
+      <p><strong>Temas a reforzar:</strong></p>
+      <ul>
+        ${topics.map(t => `<li>${t}</li>`).join("")}
+      </ul>
+      <p>Por favor, revisa estos temas en los materiales de estudio.</p>
+    `;
+  }
 }
 
 // ============================================
@@ -413,14 +551,16 @@ function changeLevel(level) {
 window.addEventListener("DOMContentLoaded", () => {
   console.log("Página cargada");
   
-  // Verificar si hay usuario guardado
   const saved = localStorage.getItem("tutor_user");
   if (saved) {
     currentUser = JSON.parse(saved);
     document.getElementById("login-screen").style.display = "none";
     document.getElementById("quiz-screen").style.display = "block";
     document.getElementById("current-user").textContent = currentUser.username;
-    loadUserProgress();
-    loadQuestion();
+    loadUserProgress().then(() => {
+      determineLevel().then(() => {
+        loadQuestion();
+      });
+    });
   }
 });
