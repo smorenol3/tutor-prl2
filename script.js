@@ -19,6 +19,7 @@ let userState = {
   experience: null,
 };
 
+let currentQuestion = null; // NUEVA: Guardar la pregunta actual
 let isRequestInProgress = false;
 let currentOptions = null;
 let isFirstMessage = true;
@@ -44,7 +45,7 @@ function addMessage(text, sender = "bot", metadata = {}) {
     Object.entries(metadata.options).forEach(([key, value]) => {
       const button = document.createElement("button");
       button.classList.add("option-button");
-      button.type = "button"; // Importante: no es submit
+      button.type = "button";
       button.textContent = `${key}. ${value}`;
       button.onclick = (e) => {
         e.preventDefault();
@@ -87,17 +88,24 @@ function selectOption(option) {
   chatForm.dispatchEvent(event);
 }
 
-async function callWorker(message) {
+async function callWorker(message, includeCurrentQuestion = false) {
   try {
+    const payload = { 
+      message,
+      userState 
+    };
+    
+    // NUEVA: Incluir la pregunta actual si es necesario
+    if (includeCurrentQuestion && currentQuestion) {
+      payload.currentQuestion = currentQuestion;
+    }
+    
     const response = await fetch(WORKER_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ 
-        message,
-        userState 
-      })
+      body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
@@ -128,20 +136,20 @@ function updateProgress() {
     
     if (successRate >= 80 && userState.currentLevel === 'BÁSICO') {
       userState.currentLevel = 'MEDIO';
-      return true; // Cambio de nivel
+      return true;
     } else if (successRate >= 80 && userState.currentLevel === 'MEDIO') {
       userState.currentLevel = 'AVANZADO';
-      return true; // Cambio de nivel
+      return true;
     } else if (successRate < 50 && userState.currentLevel === 'AVANZADO') {
       userState.currentLevel = 'MEDIO';
-      return true; // Cambio de nivel
+      return true;
     } else if (successRate < 50 && userState.currentLevel === 'MEDIO') {
       userState.currentLevel = 'BÁSICO';
-      return true; // Cambio de nivel
+      return true;
     }
   }
   
-  return false; // Sin cambio de nivel
+  return false;
 }
 
 function saveProgress() {
@@ -237,6 +245,13 @@ chatForm.addEventListener("submit", async (e) => {
           addMessage("Ahora vamos a comenzar. Responde con A, B, C o D.", "bot");
           callWorker("Genera la primera pregunta de nivel BÁSICO sobre PRL").then(firstQuestion => {
             if (firstQuestion.type === 'evaluation') {
+              // NUEVA: Guardar la pregunta actual
+              currentQuestion = {
+                text: firstQuestion.nextQuestion,
+                options: firstQuestion.options,
+                correctAnswer: firstQuestion.correctAnswer
+              };
+              
               addMessage(firstQuestion.nextQuestion, "bot", { 
                 options: firstQuestion.options,
                 progress: {
@@ -293,7 +308,8 @@ chatForm.addEventListener("submit", async (e) => {
 
   try {
     console.log("Enviando respuesta al tutor...");
-    const result = await callWorker(text);
+    // NUEVA: Incluir currentQuestion en la llamada
+    const result = await callWorker(text, true);
     
     if (result.type === 'evaluation') {
       userState.questionsAsked++;
@@ -333,6 +349,13 @@ chatForm.addEventListener("submit", async (e) => {
               setTimeout(() => {
                 callWorker(`Genera una nueva pregunta de nivel ${userState.currentLevel} sobre PRL`).then(nextQ => {
                   if (nextQ.type === 'evaluation') {
+                    // NUEVA: Guardar la pregunta actual
+                    currentQuestion = {
+                      text: nextQ.nextQuestion,
+                      options: nextQ.options,
+                      correctAnswer: nextQ.correctAnswer
+                    };
+                    
                     addMessage(nextQ.nextQuestion, "bot", { 
                       options: nextQ.options,
                       progress: {
@@ -350,6 +373,13 @@ chatForm.addEventListener("submit", async (e) => {
       } else {
         // Sin cambio de nivel, mostrar siguiente pregunta directamente
         setTimeout(() => {
+          // NUEVA: Guardar la pregunta actual
+          currentQuestion = {
+            text: result.nextQuestion,
+            options: result.options,
+            correctAnswer: result.correctAnswer
+          };
+          
           addMessage(result.nextQuestion, "bot", { 
             options: result.options,
             progress: {
