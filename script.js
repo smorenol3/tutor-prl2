@@ -21,7 +21,7 @@ let userState = {
 
 let isRequestInProgress = false;
 let currentOptions = null;
-let isFirstMessage = true; // Para saber si es la primera pregunta (rol)
+let isFirstMessage = true;
 
 // ===== FUNCIONES AUXILIARES =====
 
@@ -44,8 +44,12 @@ function addMessage(text, sender = "bot", metadata = {}) {
     Object.entries(metadata.options).forEach(([key, value]) => {
       const button = document.createElement("button");
       button.classList.add("option-button");
+      button.type = "button"; // Importante: no es submit
       button.textContent = `${key}. ${value}`;
-      button.onclick = () => selectOption(key);
+      button.onclick = (e) => {
+        e.preventDefault();
+        selectOption(key);
+      };
       optionsDiv.appendChild(button);
     });
     
@@ -70,10 +74,17 @@ function addMessage(text, sender = "bot", metadata = {}) {
 }
 
 function selectOption(option) {
-  if (isRequestInProgress) return;
+  if (isRequestInProgress) {
+    console.log("Solicitud en progreso, ignorando click");
+    return;
+  }
   
+  console.log("Opción seleccionada:", option);
   userInput.value = option.toUpperCase();
-  chatForm.dispatchEvent(new Event('submit'));
+  
+  // Simular envío del formulario
+  const event = new Event('submit', { bubbles: true });
+  chatForm.dispatchEvent(event);
 }
 
 async function callWorker(message) {
@@ -117,18 +128,20 @@ function updateProgress() {
     
     if (successRate >= 80 && userState.currentLevel === 'BÁSICO') {
       userState.currentLevel = 'MEDIO';
-      addMessage("🎉 ¡Felicidades! Has subido a nivel MEDIO. Las preguntas serán más desafiantes.", "bot");
+      return true; // Cambio de nivel
     } else if (successRate >= 80 && userState.currentLevel === 'MEDIO') {
       userState.currentLevel = 'AVANZADO';
-      addMessage("🏆 ¡Excelente! Has alcanzado nivel AVANZADO. Prepárate para preguntas complejas.", "bot");
+      return true; // Cambio de nivel
     } else if (successRate < 50 && userState.currentLevel === 'AVANZADO') {
       userState.currentLevel = 'MEDIO';
-      addMessage("⚠️ Vamos a reducir la dificultad para consolidar conocimientos.", "bot");
+      return true; // Cambio de nivel
     } else if (successRate < 50 && userState.currentLevel === 'MEDIO') {
       userState.currentLevel = 'BÁSICO';
-      addMessage("ℹ️ Vamos a volver a nivel BÁSICO para reforzar fundamentos.", "bot");
+      return true; // Cambio de nivel
     }
   }
+  
+  return false; // Sin cambio de nivel
 }
 
 function saveProgress() {
@@ -295,18 +308,58 @@ chatForm.addEventListener("submit", async (e) => {
         addMessage(feedback, "bot");
       }
       
-      updateProgress();
+      // Verificar cambio de nivel
+      const levelChanged = updateProgress();
       
-      setTimeout(() => {
-        addMessage(result.nextQuestion, "bot", { 
-          options: result.options,
-          progress: {
-            questionsAsked: userState.questionsAsked,
-            correctAnswers: userState.correctAnswers,
-            currentLevel: userState.currentLevel
-          }
-        });
-      }, 1000);
+      if (levelChanged) {
+        // Si hay cambio de nivel, mostrar mensaje y luego pedir explicación
+        const newLevel = userState.currentLevel;
+        const levelMessages = {
+          'BÁSICO': "ℹ️ Vamos a volver a nivel BÁSICO para reforzar fundamentos.",
+          'MEDIO': "🎉 ¡Felicidades! Has subido a nivel MEDIO. Las preguntas serán más desafiantes.",
+          'AVANZADO': "🏆 ¡Excelente! Has alcanzado nivel AVANZADO. Prepárate para preguntas complejas."
+        };
+        
+        addMessage(levelMessages[newLevel], "bot");
+        
+        // Después del cambio de nivel, pedir explicación
+        setTimeout(() => {
+          console.log("Pidiendo explicación después de cambio de nivel...");
+          callWorker("Proporciona una explicación educativa sobre PRL para consolidar conocimientos").then(explanation => {
+            if (explanation.type === 'explanation') {
+              addMessage(explanation.content, "bot");
+              
+              // Después de la explicación, pedir nueva pregunta
+              setTimeout(() => {
+                callWorker(`Genera una nueva pregunta de nivel ${userState.currentLevel} sobre PRL`).then(nextQ => {
+                  if (nextQ.type === 'evaluation') {
+                    addMessage(nextQ.nextQuestion, "bot", { 
+                      options: nextQ.options,
+                      progress: {
+                        questionsAsked: userState.questionsAsked,
+                        correctAnswers: userState.correctAnswers,
+                        currentLevel: userState.currentLevel
+                      }
+                    });
+                  }
+                });
+              }, 1000);
+            }
+          });
+        }, 1500);
+      } else {
+        // Sin cambio de nivel, mostrar siguiente pregunta directamente
+        setTimeout(() => {
+          addMessage(result.nextQuestion, "bot", { 
+            options: result.options,
+            progress: {
+              questionsAsked: userState.questionsAsked,
+              correctAnswers: userState.correctAnswers,
+              currentLevel: userState.currentLevel
+            }
+          });
+        }, 1000);
+      }
       
     } else if (result.type === 'explanation') {
       addMessage(result.content, "bot");
