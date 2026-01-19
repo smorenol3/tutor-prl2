@@ -1,13 +1,10 @@
 // ===== CONFIGURACIÓN =====
 const WORKER_URL = "https://tutor-prl2.s-morenoleiva91.workers.dev";
-const REQUEST_DELAY_MS = 1000;
 
 // ===== VARIABLES GLOBALES =====
-const chatContainer = document.getElementById("chat-container");
+const chatContainer = document.getElementById("chat-container" );
 const chatForm = document.getElementById("chat-form");
 const userInput = document.getElementById("user-input");
-
-const messages = [];
 
 let userState = {
   questionsAsked: 0,
@@ -21,14 +18,21 @@ let userState = {
 let currentQuestion = null;
 let isRequestInProgress = false;
 
-// ===== FUNCIONES AUXILIARES =====
+// ===== FUNCIONES =====
+
+function log(message) {
+  console.log(`[TUTOR] ${new Date().toLocaleTimeString()}: ${message}`);
+}
 
 function addMessage(text, sender = "bot", metadata = {}) {
+  log(`Añadiendo mensaje: ${sender} - ${text.substring(0, 50)}...`);
+  
   const div = document.createElement("div");
   div.classList.add("message", sender);
   
   const formattedText = text
-    .replace(/\n/g, '<br>')
+    .replace(/\n/g, '  
+')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>');
   
@@ -36,6 +40,7 @@ function addMessage(text, sender = "bot", metadata = {}) {
   
   // Añadir opciones si existen
   if (metadata.options && Object.keys(metadata.options).length > 0) {
+    log(`Añadiendo opciones: ${Object.keys(metadata.options).join(', ')}`);
     const optionsDiv = document.createElement("div");
     optionsDiv.classList.add("options-container");
     
@@ -46,6 +51,7 @@ function addMessage(text, sender = "bot", metadata = {}) {
       button.textContent = `${key}. ${value}`;
       button.onclick = (e) => {
         e.preventDefault();
+        log(`Usuario seleccionó opción: ${key}`);
         selectOption(key);
       };
       optionsDiv.appendChild(button);
@@ -71,18 +77,24 @@ function addMessage(text, sender = "bot", metadata = {}) {
 }
 
 function selectOption(option) {
-  if (isRequestInProgress) return;
+  if (isRequestInProgress) {
+    log("Solicitud en progreso, ignorando click");
+    return;
+  }
+  
+  log(`Opción seleccionada: ${option}`);
   userInput.value = option.toUpperCase();
+  
   const event = new Event('submit', { bubbles: true });
   chatForm.dispatchEvent(event);
 }
 
-async function callWorker(message, includeCurrentQuestion = false) {
+async function callWorker(message) {
+  log(`Llamando Worker con: ${message.substring(0, 50)}...`);
+  
   try {
-    const payload = { message, userState };
-    if (includeCurrentQuestion && currentQuestion) {
-      payload.currentQuestion = currentQuestion;
-    }
+    const payload = { message, userState, currentQuestion };
+    log(`Payload: ${JSON.stringify(payload).substring(0, 100)}...`);
     
     const response = await fetch(WORKER_URL, {
       method: 'POST',
@@ -90,86 +102,53 @@ async function callWorker(message, includeCurrentQuestion = false) {
       body: JSON.stringify(payload)
     });
 
+    log(`Respuesta Worker: status ${response.status}`);
+
     if (!response.ok) {
       const errorText = await response.text();
+      log(`Error HTTP ${response.status}: ${errorText}`);
       throw new Error(`Error ${response.status}: ${errorText}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    log(`Datos recibidos: type=${data.type}`);
+    return data;
   } catch (error) {
-    console.error("Error en callWorker:", error);
+    log(`Error en callWorker: ${error.message}`);
     throw error;
   }
 }
 
-function updateProgress() {
-  const total = userState.correctAnswers + userState.incorrectAnswers;
-  if (total === 0) return false;
-  
-  const rate = (userState.correctAnswers / total) * 100;
-  const oldLevel = userState.currentLevel;
-  
-  if (rate >= 80 && userState.currentLevel === 'BÁSICO') {
-    userState.currentLevel = 'MEDIO';
-  } else if (rate >= 80 && userState.currentLevel === 'MEDIO') {
-    userState.currentLevel = 'AVANZADO';
-  } else if (rate < 50 && userState.currentLevel === 'AVANZADO') {
-    userState.currentLevel = 'MEDIO';
-  } else if (rate < 50 && userState.currentLevel === 'MEDIO') {
-    userState.currentLevel = 'BÁSICO';
-  }
-  
-  return oldLevel !== userState.currentLevel;
-}
-
 function saveProgress() {
   try {
-    localStorage.setItem('tutorPRL_progress', JSON.stringify({
-      questionsAsked: userState.questionsAsked,
-      correctAnswers: userState.correctAnswers,
-      incorrectAnswers: userState.incorrectAnswers,
-      currentLevel: userState.currentLevel,
-      phase: userState.phase,
-      role: userState.role,
-      messages: messages.slice(-20)
-    }));
+    localStorage.setItem('tutorPRL_state', JSON.stringify(userState));
+    log(`Progreso guardado: ${userState.questionsAsked} preguntas`);
   } catch (err) {
-    console.error("Error al guardar:", err);
+    log(`Error guardando: ${err.message}`);
   }
 }
 
 function loadProgress() {
-  const saved = localStorage.getItem('tutorPRL_progress');
-  if (!saved) return;
-  
   try {
-    const progress = JSON.parse(saved);
-    userState.questionsAsked = progress.questionsAsked || 0;
-    userState.correctAnswers = progress.correctAnswers || 0;
-    userState.incorrectAnswers = progress.incorrectAnswers || 0;
-    userState.currentLevel = progress.currentLevel || 'BÁSICO';
-    userState.phase = progress.phase || 'role';
-    userState.role = progress.role || null;
-    
-    if (progress.messages && Array.isArray(progress.messages)) {
-      progress.messages.forEach(msg => {
-        messages.push(msg);
-        if (msg.role === 'user') addMessage(msg.content, 'user');
-        else addMessage(msg.content, 'bot', msg.metadata);
-      });
+    const saved = localStorage.getItem('tutorPRL_state');
+    if (saved) {
+      userState = JSON.parse(saved);
+      log(`Progreso cargado: ${userState.questionsAsked} preguntas`);
     }
   } catch (err) {
-    console.error("Error al cargar:", err);
+    log(`Error cargando: ${err.message}`);
   }
 }
 
 // ===== INICIALIZACIÓN =====
 
+log("Inicializando tutor PRL...");
 loadProgress();
 
-if (messages.length === 0) {
-  addMessage("Hola, soy tu tutor adaptativo de PRL. Vamos a trabajar con preguntas tipo test que se adaptarán a tu nivel de conocimiento.\n\n¿Cuál es tu rol en la empresa? (comercial, back-office, IT, etc.)", "bot");
+if (!userState.role) {
+  addMessage("Hola, soy tu tutor adaptativo de PRL. Vamos a trabajar con preguntas tipo test que se adaptarán a tu nivel de conocimiento.\\n\\n¿Cuál es tu rol en la empresa? (comercial, back-office, IT, etc.)", "bot");
   userState.phase = 'role';
+  log("Esperando rol del usuario");
 }
 
 // ===== EVENT LISTENERS =====
@@ -179,182 +158,195 @@ chatForm.addEventListener("submit", async (e) => {
   let text = userInput.value.trim();
   if (!text) return;
 
-  // FASE 1: OBTENER ROL
-  if (userState.phase === 'role') {
-    addMessage(text, "user");
-    userInput.value = "";
-    const submitButton = chatForm.querySelector("button");
-    submitButton.disabled = true;
-    isRequestInProgress = true;
+  log(`Usuario escribió: ${text}`);
+  
+  if (isRequestInProgress) {
+    log("Ya hay una solicitud en progreso");
+    return;
+  }
 
-    messages.push({ role: "user", content: text });
-    
-    await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY_MS));
+  addMessage(text, "user");
+  userInput.value = "";
+  isRequestInProgress = true;
+  const submitButton = chatForm.querySelector("button");
+  submitButton.disabled = true;
 
-    try {
+  try {
+    // FASE 1: OBTENER ROL
+    if (userState.phase === 'role') {
+      log("FASE: Obtener rol");
+      
       const result = await callWorker(text);
       
-      if (result.type === 'initial') {
+      if (result.type === 'roleSet') {
         userState.role = text;
         userState.phase = 'question';
-        addMessage(result.content, "bot");
-        messages.push({ role: "assistant", content: result.content, metadata: {} });
+        addMessage(result.message, "bot");
+        log(`Rol establecido: ${text}`);
+        saveProgress();
         
-        // GENERAR PRIMERA PREGUNTA
+        // Generar primera pregunta
+        log("Generando primera pregunta...");
         setTimeout(async () => {
           try {
-            const firstQuestion = await callWorker("Genera la primera pregunta de nivel BÁSICO sobre PRL con 4 opciones (A, B, C, D)");
+            const firstQ = await callWorker('GENERAR_PREGUNTA');
             
-            if (firstQuestion.type === 'evaluation') {
+            if (firstQ.type === 'question') {
               currentQuestion = {
-                text: firstQuestion.nextQuestion,
-                options: firstQuestion.options,
-                correctAnswer: firstQuestion.correctAnswer
+                text: firstQ.question,
+                options: firstQ.options,
+                correctAnswer: firstQ.correctAnswer
               };
               
-              addMessage(firstQuestion.nextQuestion, "bot", {
-                options: firstQuestion.options,
+              log(`Primera pregunta generada: ${firstQ.question.substring(0, 50)}...`);
+              
+              addMessage(firstQ.question, "bot", {
+                options: firstQ.options,
                 progress: {
                   questionsAsked: 0,
                   correctAnswers: 0,
                   currentLevel: 'BÁSICO'
                 }
               });
-              
-              saveProgress();
             }
           } catch (err) {
-            console.error("Error generando primera pregunta:", err);
+            log(`Error generando primera pregunta: ${err.message}`);
             addMessage("Error al generar la primera pregunta. Por favor, intenta de nuevo.", "bot");
+          } finally {
+            submitButton.disabled = false;
+            isRequestInProgress = false;
           }
         }, 1000);
+        return;
       }
+    }
+
+    // FASE 2: RESPONDER PREGUNTAS
+    if (userState.phase === 'question') {
+      text = text.toUpperCase();
       
-      saveProgress();
-    } catch (err) {
-      console.error("Error:", err);
-      addMessage("Ha ocurrido un error. Por favor, intenta de nuevo.", "bot");
-    } finally {
-      submitButton.disabled = false;
-      isRequestInProgress = false;
-    }
-    return;
-  }
+      if (!/^[A-D]$/.test(text)) {
+        log("Respuesta inválida, no es A-D");
+        addMessage("Por favor, responde con A, B, C o D", "bot");
+        userInput.value = "";
+        submitButton.disabled = false;
+        isRequestInProgress = false;
+        return;
+      }
 
-  // FASE 2: RESPONDER PREGUNTAS
-  if (userState.phase === 'question') {
-    text = text.toUpperCase();
-    if (!/^[A-D]$/.test(text)) {
-      addMessage("Por favor, responde con A, B, C o D", "bot");
-      userInput.value = "";
-      return;
-    }
-
-    if (isRequestInProgress) {
-      addMessage("Por favor, espera a que termine la respuesta anterior.", "bot");
-      return;
-    }
-
-    addMessage(text, "user");
-    userInput.value = "";
-    const submitButton = chatForm.querySelector("button");
-    submitButton.disabled = true;
-    isRequestInProgress = true;
-
-    messages.push({ role: "user", content: text });
-    
-    await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY_MS));
-
-    try {
-      const result = await callWorker(text, true);
+      log(`FASE: Evaluar respuesta - ${text}`);
+      
+      const result = await callWorker(text);
       
       if (result.type === 'evaluation') {
-        userState.questionsAsked++;
+        log(`Evaluación: correcto=${result.isCorrect}, preguntas=${result.questionsAsked}`);
         
-        if (result.isCorrect) {
-          userState.correctAnswers++;
-          addMessage(`✅ ¡Correcto! ${result.feedback}`, "bot");
-        } else {
-          userState.incorrectAnswers++;
-          addMessage(`❌ Incorrecto. ${result.feedback}\n\n**Respuesta correcta:** ${result.correctAnswer}\n\n**Justificación:** ${result.justification}`, "bot");
-        }
+        userState.questionsAsked = result.questionsAsked;
+        userState.correctAnswers = result.correctAnswers;
+        userState.incorrectAnswers = result.incorrectAnswers;
+        userState.currentLevel = result.currentLevel;
         
-        const levelChanged = updateProgress();
+        addMessage(result.feedback, "bot");
+        saveProgress();
         
-        if (levelChanged) {
-          const levelMessages = {
-            'BÁSICO': "ℹ️ Vamos a volver a nivel BÁSICO para reforzar fundamentos.",
-            'MEDIO': "🎉 ¡Felicidades! Has subido a nivel MEDIO. Las preguntas serán más desafiantes.",
-            'AVANZADO': "🏆 ¡Excelente! Has alcanzado nivel AVANZADO. Prepárate para preguntas complejas."
-          };
-          
-          addMessage(levelMessages[userState.currentLevel], "bot");
+        // Si cambió de nivel o es momento de explicación
+        if (result.levelChanged || result.questionsAsked % 5 === 0) {
+          log(`Cambio de nivel o explicación requerida`);
           
           setTimeout(async () => {
             try {
-              const explanation = await callWorker("Proporciona una explicación educativa sobre PRL para consolidar conocimientos");
+              log("Generando explicación...");
+              const explanation = await callWorker('GENERAR_EXPLICACION');
+              
               if (explanation.type === 'explanation') {
                 addMessage(explanation.content, "bot");
-                
-                setTimeout(async () => {
-                  try {
-                    const nextQ = await callWorker(`Genera una nueva pregunta de nivel ${userState.currentLevel} sobre PRL con 4 opciones (A, B, C, D)`);
-                    if (nextQ.type === 'evaluation') {
-                      currentQuestion = {
-                        text: nextQ.nextQuestion,
-                        options: nextQ.options,
-                        correctAnswer: nextQ.correctAnswer
-                      };
-                      
-                      addMessage(nextQ.nextQuestion, "bot", {
-                        options: nextQ.options,
-                        progress: {
-                          questionsAsked: userState.questionsAsked,
-                          correctAnswers: userState.correctAnswers,
-                          currentLevel: userState.currentLevel
-                        }
-                      });
-                    }
-                  } catch (err) {
-                    console.error("Error:", err);
-                  }
-                }, 1000);
+                log("Explicación mostrada");
               }
+              
+              // Generar siguiente pregunta
+              setTimeout(async () => {
+                try {
+                  log("Generando siguiente pregunta...");
+                  const nextQ = await callWorker('GENERAR_PREGUNTA');
+                  
+                  if (nextQ.type === 'question') {
+                    currentQuestion = {
+                      text: nextQ.question,
+                      options: nextQ.options,
+                      correctAnswer: nextQ.correctAnswer
+                    };
+                    
+                    log(`Siguiente pregunta generada`);
+                    
+                    addMessage(nextQ.question, "bot", {
+                      options: nextQ.options,
+                      progress: {
+                        questionsAsked: userState.questionsAsked,
+                        correctAnswers: userState.correctAnswers,
+                        currentLevel: userState.currentLevel
+                      }
+                    });
+                  }
+                } catch (err) {
+                  log(`Error generando siguiente pregunta: ${err.message}`);
+                  addMessage("Error al generar la siguiente pregunta.", "bot");
+                } finally {
+                  submitButton.disabled = false;
+                  isRequestInProgress = false;
+                }
+              }, 1500);
             } catch (err) {
-              console.error("Error:", err);
+              log(`Error generando explicación: ${err.message}`);
+              addMessage("Error al generar la explicación.", "bot");
+              submitButton.disabled = false;
+              isRequestInProgress = false;
             }
           }, 1500);
         } else {
-          setTimeout(() => {
-            currentQuestion = {
-              text: result.nextQuestion,
-              options: result.options,
-              correctAnswer: result.correctAnswer
-            };
-            
-            addMessage(result.nextQuestion, "bot", {
-              options: result.options,
-              progress: {
-                questionsAsked: userState.questionsAsked,
-                correctAnswers: userState.correctAnswers,
-                currentLevel: userState.currentLevel
+          // Sin cambio de nivel, generar siguiente pregunta directamente
+          log("Generando siguiente pregunta (sin cambio de nivel)...");
+          
+          setTimeout(async () => {
+            try {
+              const nextQ = await callWorker('GENERAR_PREGUNTA');
+              
+              if (nextQ.type === 'question') {
+                currentQuestion = {
+                  text: nextQ.question,
+                  options: nextQ.options,
+                  correctAnswer: nextQ.correctAnswer
+                };
+                
+                log(`Siguiente pregunta generada`);
+                
+                addMessage(nextQ.question, "bot", {
+                  options: nextQ.options,
+                  progress: {
+                    questionsAsked: userState.questionsAsked,
+                    correctAnswers: userState.correctAnswers,
+                    currentLevel: userState.currentLevel
+                  }
+                });
               }
-            });
+            } catch (err) {
+              log(`Error generando siguiente pregunta: ${err.message}`);
+              addMessage("Error al generar la siguiente pregunta.", "bot");
+            } finally {
+              submitButton.disabled = false;
+              isRequestInProgress = false;
+            }
           }, 1000);
         }
+        return;
       }
-      
-      messages.push({ role: "assistant", content: result.feedback || result.content, metadata: {} });
-      saveProgress();
-      
-    } catch (err) {
-      console.error("Error:", err);
-      addMessage("Ha ocurrido un error. Por favor, intenta de nuevo.", "bot");
-    } finally {
-      submitButton.disabled = false;
-      isRequestInProgress = false;
     }
+
+  } catch (err) {
+    log(`Error general: ${err.message}`);
+    addMessage(`Error: ${err.message}`, "bot");
+    submitButton.disabled = false;
+    isRequestInProgress = false;
   }
 });
 
-setInterval(saveProgress, 15000);
+log("Tutor PRL inicializado correctamente");
