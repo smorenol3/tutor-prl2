@@ -17,7 +17,7 @@ let currentUser = null;
 // AUTENTICACIÓN
 // ============================================
 
-function toggleForms() {
+function toggleForms( ) {
   document.getElementById("login-form").style.display = 
     document.getElementById("login-form").style.display === "none" ? "block" : "none";
   document.getElementById("register-form").style.display = 
