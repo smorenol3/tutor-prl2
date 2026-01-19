@@ -3,33 +3,86 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tutor PRL Adaptativo</title>
-  <link rel="stylesheet" href="style.css">
+  <title>Tutor PRL - Versión Simple</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 700px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+      padding: 40px;
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+
+    #question-container {
+      min-height: 300px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .loading {
+      text-align: center;
+      color: #666;
+    }
+
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
 </head>
 <body>
-  <div class="app">
-    <header>
-      <h1>Tutor PRL Adaptativo</h1>
-      <p>Preguntas de opción múltiple que se adaptan a tu nivel</p>
-    </header>
-
-    <main id="chat-container"></main>
-
-    <form id="chat-form">
-      <input
-        type="text"
-        id="user-input"
-        placeholder="Escribe tu respuesta..."
-        autocomplete="off"
-      >
-      <button type="submit">Enviar</button>
-    </form>
-
-    <div class="footer-section">
-      <button type="button" onclick="clearProgress()" class="reset-button">Nuevo Test</button>
+  <div class="container">
+    <h1>📚 Tutor PRL</h1>
+    <p class="subtitle">Prevención de Riesgos Laborales</p>
+    
+    <div id="question-container">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Cargando pregunta...</p>
+      </div>
     </div>
   </div>
 
-  <script src="script.js"></script>
+  <script src="script_simple.js"></script>
 </body>
 </html>
