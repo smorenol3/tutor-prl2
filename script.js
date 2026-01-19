@@ -1,6 +1,6 @@
 // ============================================
 // FRONTEND SIMPLE - PASO 3
-// Solo muestra preguntas (sin evaluación aún)
+// Solo muestra preguntas (sin evaluación aún )
 // ============================================
 
 // CONFIGURACIÓN
@@ -11,7 +11,7 @@ let currentLevel = "BÁSICO";
 // ============================================
 // CARGAR PREGUNTA
 // ============================================
-async function loadQuestion() {
+async function loadQuestion( ) {
   try {
     console.log(`Cargando pregunta de nivel: ${currentLevel}`);
     
